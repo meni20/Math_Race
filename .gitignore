@@ -1,0 +1,31 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Server / Gradle
+server/.gradle/
+server/.gradle-user-home/
+server/.pg-local/
+server/.tools/
+server/build/
+server/build-*/
+server/build_*/
+server/tmp-*
+
+# Client / Vite
+client/node_modules/
+client/dist/
+client/codex_vehicle_debug*.png
+*.tsbuildinfo
+
+# Logs
+*.log

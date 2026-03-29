@@ -1,0 +1,237 @@
+import { create } from "zustand";
+import type {
+  AnswerFeedbackMessage,
+  DecisionPointMessage,
+  GameStateUpdateMessage,
+  PlayerSnapshot,
+  QuestionMessage,
+  RoomJoinedMessage
+} from "../types/messages";
+
+type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
+
+interface AnswerFeedbackState {
+  correct: boolean;
+  accepted: boolean;
+  receivedAtMs: number;
+}
+
+interface GameStore {
+  connection: ConnectionStatus;
+  roomId: string;
+  playerId: string;
+  displayName: string;
+  raceStartedAtMs: number;
+  raceFinishedAtMs: number | null;
+  racePlacement: number | null;
+  raceStopped: boolean;
+  winnerPlayerId: string;
+  trackLengthMeters: number;
+  totalLaps: number;
+  latestTick: number;
+  players: Record<string, PlayerSnapshot>;
+  playerIds: string[];
+  question: QuestionMessage | null;
+  questionReceivedAtMs: number;
+  decision: DecisionPointMessage | null;
+  answerFeedback: AnswerFeedbackState | null;
+  setConnection: (status: ConnectionStatus) => void;
+  prepareJoin: (roomId: string, displayName: string, playerId: string) => void;
+  applyJoin: (message: RoomJoinedMessage) => void;
+  applyStateUpdate: (message: GameStateUpdateMessage) => void;
+  applyQuestion: (message: QuestionMessage) => void;
+  applyDecision: (message: DecisionPointMessage) => void;
+  applyAnswerFeedback: (message: AnswerFeedbackMessage) => void;
+  clearDecision: () => void;
+  clearQuestion: () => void;
+  resetSession: () => void;
+}
+
+const initialState = {
+  connection: "idle" as ConnectionStatus,
+  roomId: "",
+  playerId: "",
+  displayName: "",
+  raceStartedAtMs: 0,
+  raceFinishedAtMs: null as number | null,
+  racePlacement: null as number | null,
+  raceStopped: false,
+  winnerPlayerId: "",
+  trackLengthMeters: 3000,
+  totalLaps: 1,
+  latestTick: 0,
+  players: {} as Record<string, PlayerSnapshot>,
+  playerIds: [] as string[],
+  question: null as QuestionMessage | null,
+  questionReceivedAtMs: 0,
+  decision: null as DecisionPointMessage | null,
+  answerFeedback: null as AnswerFeedbackState | null
+};
+
+export const useGameStore = create<GameStore>((set, get) => ({
+  ...initialState,
+  setConnection: (status) => {
+    set({ connection: status });
+  },
+  prepareJoin: (roomId, displayName, playerId) => {
+    set({
+      roomId: roomId.trim(),
+      displayName: displayName.trim(),
+      playerId: playerId.trim(),
+      raceStartedAtMs: 0,
+      raceFinishedAtMs: null,
+      racePlacement: null,
+      raceStopped: false,
+      winnerPlayerId: "",
+      latestTick: 0,
+      players: {},
+      playerIds: [],
+      question: null,
+      questionReceivedAtMs: 0,
+      decision: null,
+      answerFeedback: null
+    });
+  },
+  applyJoin: (message) => {
+    set({
+      roomId: message.roomId,
+      playerId: message.targetPlayerId,
+      displayName: message.displayName,
+      totalLaps: message.totalLaps,
+      trackLengthMeters: message.trackLengthMeters
+    });
+  },
+  applyStateUpdate: (message) => {
+    set((state) => {
+      if (state.roomId && message.roomId !== state.roomId) {
+        return state;
+      }
+
+      const raceStopped = Boolean(message.raceStopped);
+      const raceStoppedAtMs = typeof message.raceStoppedAtMs === "number" ? message.raceStoppedAtMs : 0;
+      const raceStartedAtFromServer = typeof message.raceStartedAtMs === "number" ? message.raceStartedAtMs : 0;
+      const winnerPlayerId = message.winnerPlayerId ?? "";
+      const playersById: Record<string, PlayerSnapshot> = {};
+      for (const player of message.players) {
+        const safePosition = Number.isFinite(player.positionMeters) ? Math.max(0, player.positionMeters) : 0;
+        const safeSpeed = Number.isFinite(player.speedMps) ? Math.max(0, player.speedMps) : 0;
+        playersById[player.playerId] = {
+          ...player,
+          positionMeters: safePosition,
+          speedMps: safeSpeed
+        };
+      }
+
+      const incomingIds = message.players.map((player) => player.playerId);
+      const idsChanged =
+        incomingIds.length !== state.playerIds.length ||
+        incomingIds.some((id) => !state.playerIds.includes(id));
+
+      const localPlayer = state.playerId ? playersById[state.playerId] : undefined;
+      const previousLocal = state.playerId ? state.players[state.playerId] : undefined;
+
+      let raceStartedAtMs = raceStartedAtFromServer > 0
+        ? raceStartedAtFromServer
+        : state.raceStartedAtMs;
+      if (!raceStartedAtMs && localPlayer) {
+        raceStartedAtMs = Date.now();
+      }
+
+      const sortedStandings = Object.values(playersById).sort((a, b) => {
+        if (a.lap !== b.lap) {
+          return b.lap - a.lap;
+        }
+        return b.positionMeters - a.positionMeters;
+      });
+
+      let raceFinishedAtMs = state.raceFinishedAtMs;
+      let racePlacement = state.racePlacement;
+      let question = state.question;
+      let decision = state.decision;
+
+      const raceRestarted = state.raceStopped && !raceStopped;
+      if (raceRestarted) {
+        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : Date.now();
+        raceFinishedAtMs = null;
+        racePlacement = null;
+        if (question && question.expiresAtMs <= raceStartedAtMs) {
+          question = null;
+        }
+        decision = null;
+      }
+
+      if (raceStopped) {
+        raceFinishedAtMs = raceStoppedAtMs > 0
+          ? raceStoppedAtMs
+          : (state.raceFinishedAtMs ?? Date.now());
+        const finishIndex = sortedStandings.findIndex((player) => player.playerId === state.playerId);
+        racePlacement = finishIndex >= 0 ? finishIndex + 1 : null;
+        question = null;
+        decision = null;
+      }
+
+      if (!raceStopped && previousLocal?.finished && localPlayer && !localPlayer.finished) {
+        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : Date.now();
+        raceFinishedAtMs = null;
+        racePlacement = null;
+      }
+
+      return {
+        players: playersById,
+        playerIds: idsChanged ? incomingIds : state.playerIds,
+        latestTick: message.tick,
+        raceStartedAtMs,
+        raceFinishedAtMs,
+        racePlacement,
+        raceStopped,
+        winnerPlayerId,
+        question,
+        decision
+      };
+    });
+  },
+  applyQuestion: (message) => {
+    if (message.targetPlayerId !== get().playerId) {
+      return;
+    }
+    set({
+      question: message,
+      questionReceivedAtMs: Date.now(),
+      decision: null
+    });
+  },
+  applyDecision: (message) => {
+    if (message.targetPlayerId !== get().playerId) {
+      return;
+    }
+    set({
+      decision: message,
+      question: null
+    });
+  },
+  applyAnswerFeedback: (message) => {
+    if (message.targetPlayerId !== get().playerId) {
+      return;
+    }
+    set({
+      answerFeedback: {
+        correct: message.correct,
+        accepted: message.accepted,
+        receivedAtMs: Date.now()
+      }
+    });
+  },
+  clearDecision: () => {
+    set({ decision: null });
+  },
+  clearQuestion: () => {
+    set({ question: null, questionReceivedAtMs: 0 });
+  },
+  resetSession: () => {
+    set({
+      ...initialState,
+      roomId: get().roomId,
+      displayName: get().displayName
+    });
+  }
+}));

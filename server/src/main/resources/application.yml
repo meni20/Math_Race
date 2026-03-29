@@ -1,0 +1,18 @@
+git push -u origin mainspring:
+  profiles:
+    default: local
+
+server:
+  port: ${SERVER_PORT:8080}
+
+  jackson:
+    default-property-inclusion: non_null
+
+game:
+  tick-rate-ms: 50
+  track-length-meters: 3000
+  total-laps: 1
+
+app:
+  websocket:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
