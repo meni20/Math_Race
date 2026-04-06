@@ -9,7 +9,9 @@ const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
 
 function laneToX(laneIndex: number) {
-  const normalizedLane = Math.max(0, Math.min(3, laneIndex));
+  const normalizedLane = Number.isFinite(laneIndex)
+    ? Math.max(0, Math.min(3, Math.trunc(laneIndex)))
+    : 0;
   return (normalizedLane - 1.5) * LANE_WIDTH;
 }
 

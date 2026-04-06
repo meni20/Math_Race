@@ -1,8 +1,12 @@
 package com.asphalt8.backend.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.asphalt8.backend.game.dto.GameStateUpdateMessage;
@@ -10,8 +14,10 @@ import com.asphalt8.backend.game.dto.JoinRoomRequest;
 import com.asphalt8.backend.game.dto.PlayerSnapshot;
 import com.asphalt8.backend.game.dto.RoomJoinedMessage;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
@@ -74,5 +80,45 @@ public class GameCommandServiceTest {
         verify(messagingTemplate).convertAndSendToUser("principal-1", "/queue/game.state", initialState);
         verify(messagingTemplate).convertAndSendToUser("principal-2", "/queue/game.state", initialState);
         verify(gameStateService).joinRoom(eq(new JoinRoomRequest("arena-1", "p-1", "Player One")));
+    }
+
+    @Test
+    public void handleJoinRateLimitSendsErrorInsteadOfLeavingClientConnected() {
+        JoinRoomRequest request = new JoinRoomRequest("arena-1", "p-1", "Player One");
+        when(inboundRateLimiter.allow("principal-1", "join", 500L)).thenReturn(false);
+
+        gameCommandService.handleJoin(request, "principal-1");
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(messagingTemplate).convertAndSendToUser(eq("principal-1"), eq("/queue/game.error"), payloadCaptor.capture());
+        verifyNoInteractions(sessionBindingService);
+        verifyNoInteractions(gameStateService);
+
+        Object payload = payloadCaptor.getValue();
+        assertInstanceOf(Map.class, payload);
+        Map<?, ?> errorPayload = (Map<?, ?>) payload;
+        assertEquals("JOIN_RATE_LIMITED", errorPayload.get("code"));
+        assertEquals("arena-1", errorPayload.get("roomId"));
+        assertEquals("p-1", errorPayload.get("playerId"));
+    }
+
+    @Test
+    public void handleJoinInvalidIdsSendsErrorInsteadOfSilentlyReturning() {
+        JoinRoomRequest request = new JoinRoomRequest("arena-1", "", "Player One");
+        when(inboundRateLimiter.allow("principal-1", "join", 500L)).thenReturn(true);
+
+        gameCommandService.handleJoin(request, "principal-1");
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(messagingTemplate).convertAndSendToUser(eq("principal-1"), eq("/queue/game.error"), payloadCaptor.capture());
+        verify(sessionBindingService, never()).bind(any(), any(), any());
+        verifyNoInteractions(gameStateService);
+
+        Object payload = payloadCaptor.getValue();
+        assertInstanceOf(Map.class, payload);
+        Map<?, ?> errorPayload = (Map<?, ?>) payload;
+        assertEquals("INVALID_JOIN_REQUEST", errorPayload.get("code"));
+        assertEquals("arena-1", errorPayload.get("roomId"));
+        assertEquals("", errorPayload.get("playerId"));
     }
 }

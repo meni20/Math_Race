@@ -581,6 +581,7 @@ public class GameStateService {
             )
             .map(player -> {
                 int safeLap = Math.max(0, Math.min(totalLaps, player.getLap()));
+                int safeLaneIndex = Math.max(0, Math.min(3, player.getLaneIndex()));
                 double safePosition = sanitizeFinite(player.getPositionMeters(), 0D);
                 safePosition = Math.max(0D, Math.min(trackLength, safePosition));
                 if (player.isFinished()) {
@@ -591,7 +592,7 @@ public class GameStateService {
                 return new PlayerSnapshot(
                     player.getPlayerId(),
                     player.getDisplayName(),
-                    player.getLaneIndex(),
+                    safeLaneIndex,
                     round(safePosition),
                     round(safeSpeed),
                     safeLap,

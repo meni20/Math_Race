@@ -1,0 +1,37 @@
+{
+  "name": "supabase-db-migrator",
+  "version": "0.1.0",
+  "description": "Connect Codex to Supabase and safely migrate this project's PostgreSQL data.",
+  "author": {
+    "name": "Asphalt8 Local Plugin"
+  },
+  "homepage": "https://supabase.com/mcp",
+  "license": "UNLICENSED",
+  "keywords": [
+    "supabase",
+    "postgres",
+    "migration",
+    "database"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Supabase DB Migrator",
+    "shortDescription": "Safe Postgres to Supabase migration helper",
+    "longDescription": "Adds the hosted Supabase MCP server in read-only mode and bundles a verified pg_dump/pg_restore workflow for moving this project's PostgreSQL data into a Supabase project with row-count checks.",
+    "developerName": "Asphalt8",
+    "category": "Database",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://supabase.com/mcp",
+    "defaultPrompt": [
+      "Connect this repo to my Supabase project",
+      "Migrate my Postgres data into Supabase safely",
+      "Verify row counts after the Supabase restore"
+    ],
+    "brandColor": "#3ECF8E",
+    "screenshots": []
+  }
+}

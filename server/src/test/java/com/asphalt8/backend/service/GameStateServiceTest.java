@@ -154,4 +154,22 @@ public class GameStateServiceTest {
         assertTrue(snapshot.positionMeters() >= 0.0);
         assertTrue(snapshot.speedMps() >= 0.0);
     }
+
+    @Test
+    public void tickClampsInvalidLaneIndexBeforeBroadcast() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-5", "p-1", "Player One"));
+        GameRoomState room = gameStateService.getRooms().iterator().next();
+
+        synchronized (room.getLock()) {
+            PlayerState player = room.getPlayers().get("p-1");
+            assertNotNull(player);
+            player.setLaneIndex(999);
+        }
+
+        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
+        assertEquals(1, dispatch.stateUpdates().size());
+
+        var snapshot = dispatch.stateUpdates().get(0).players().get(0);
+        assertEquals(3, snapshot.laneIndex());
+    }
 }

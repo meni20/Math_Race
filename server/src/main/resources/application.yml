@@ -1,9 +1,9 @@
-git push -u origin mainspring:
+spring:
   profiles:
     default: local
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${PORT:${SERVER_PORT:8080}}
 
   jackson:
     default-property-inclusion: non_null

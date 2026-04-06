@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?read_only=true&features=database,docs",
+      "note": "Official hosted Supabase MCP server in read-only mode. After OAuth sign-in, scope this URL to a single project by adding project_ref=<your-project-ref> when you are ready."
+    }
+  }
+}

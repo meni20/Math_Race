@@ -15,7 +15,7 @@
    - `.\gradlew.bat bootRun`
 3. Optional PostgreSQL mode:
    - Set `SPRING_PROFILES_ACTIVE=db`
-   - Set `DB_URL`
+   - Set `DB_URL` or `DB_HOST` + `DB_PORT` + `DB_NAME`
    - Set `DB_USER`
    - Set `DB_PASS`
 
@@ -27,6 +27,15 @@
    - `VITE_BACKEND_URL=http://localhost:8080`
 3. Start:
    - `npm run dev`
+
+## Render Env
+- Server reads `PORT` automatically on Render, with `SERVER_PORT` still supported locally.
+- For PostgreSQL on Render, set `SPRING_PROFILES_ACTIVE=db` and either:
+  - `DB_URL`
+  - or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- For the deployed frontend URL, set `ALLOWED_ORIGINS=https://<your-client>.onrender.com`
+- For the client service, set `VITE_BACKEND_URL=https://<your-server>.onrender.com`
+- Example env files live at `server/.env.example` and `client/.env.example`
 
 ## Key Files
 - Server WebSocket config: `server/src/main/java/com/asphalt8/backend/config/WebSocketConfig.java`

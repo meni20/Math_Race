@@ -7,6 +7,7 @@ import type {
   QuestionMessage,
   RoomJoinedMessage
 } from "../types/messages";
+import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -74,10 +75,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ connection: status });
   },
   prepareJoin: (roomId, displayName, playerId) => {
+    const normalizedRoomId = normalizeRoomId(roomId);
+    const normalizedPlayerId = normalizePlayerId(playerId);
     set({
-      roomId: roomId.trim(),
+      roomId: normalizedRoomId,
       displayName: displayName.trim(),
-      playerId: playerId.trim(),
+      playerId: normalizedPlayerId,
       raceStartedAtMs: 0,
       raceFinishedAtMs: null,
       racePlacement: null,
@@ -97,6 +100,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       roomId: message.roomId,
       playerId: message.targetPlayerId,
       displayName: message.displayName,
+      connection: "connected",
       totalLaps: message.totalLaps,
       trackLengthMeters: message.trackLengthMeters
     });
@@ -113,10 +117,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const winnerPlayerId = message.winnerPlayerId ?? "";
       const playersById: Record<string, PlayerSnapshot> = {};
       for (const player of message.players) {
+        const safeLaneIndex = Number.isFinite(player.laneIndex)
+          ? Math.max(0, Math.min(3, Math.trunc(player.laneIndex)))
+          : 0;
         const safePosition = Number.isFinite(player.positionMeters) ? Math.max(0, player.positionMeters) : 0;
         const safeSpeed = Number.isFinite(player.speedMps) ? Math.max(0, player.speedMps) : 0;
         playersById[player.playerId] = {
           ...player,
+          laneIndex: safeLaneIndex,
           positionMeters: safePosition,
           speedMps: safeSpeed
         };

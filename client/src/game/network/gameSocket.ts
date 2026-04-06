@@ -1,9 +1,11 @@
 import { Client, StompSubscription } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { useGameStore } from "../store/useGameStore";
+import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 import type {
   AnswerFeedbackMessage,
   AnswerSubmissionRequest,
+  ConnectPayload,
   DecisionChoiceRequest,
   DecisionPointMessage,
   GameStateUpdateMessage,
@@ -11,12 +13,8 @@ import type {
   QuestionMessage,
   RoomJoinedMessage
 } from "../types/messages";
-
-interface ConnectPayload {
-  roomId: string;
-  playerId: string;
-  displayName: string;
-}
+import { DemoRaceClient } from "./demoRace";
+import { getGameBackendUrl } from "./transportConfig";
 
 interface GameErrorMessage {
   code?: string;
@@ -31,6 +29,7 @@ class GameSocketClient {
   private personalSubscriptions: StompSubscription[] = [];
   private lifecycle: Promise<void> = Promise.resolve();
   private connectionGeneration = 0;
+  private demoClient = new DemoRaceClient();
 
   connect(payload: ConnectPayload) {
     this.lifecycle = this.lifecycle.then(() => this.connectInternal(payload));
@@ -43,6 +42,11 @@ class GameSocketClient {
   }
 
   submitAnswer(answer: string) {
+    if (getGameBackendUrl() === null) {
+      this.demoClient.submitAnswer(answer);
+      return;
+    }
+
     const state = useGameStore.getState();
     if (!this.client || !this.client.connected || !state.question) {
       return;
@@ -61,6 +65,11 @@ class GameSocketClient {
   }
 
   submitDecision(choice: "HIGHWAY" | "DIRT") {
+    if (getGameBackendUrl() === null) {
+      this.demoClient.submitDecision(choice);
+      return;
+    }
+
     const state = useGameStore.getState();
     if (!this.client || !this.client.connected || !state.decision) {
       return;
@@ -149,11 +158,17 @@ class GameSocketClient {
   }
 
   private async connectInternal(payload: ConnectPayload) {
+    await this.demoClient.disconnect();
     await this.deactivateCurrentClient(false);
     this.intentionalDisconnect = false;
     useGameStore.getState().setConnection("connecting");
 
-    const backendUrl = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
+    const backendUrl = getGameBackendUrl();
+    if (!backendUrl) {
+      await this.demoClient.connect(payload);
+      return;
+    }
+
     const wsUrl = `${backendUrl}/ws`;
     const generation = ++this.connectionGeneration;
 
@@ -170,12 +185,13 @@ class GameSocketClient {
         return;
       }
 
-      useGameStore.getState().setConnection("connected");
       this.subscribeToPersonalQueues();
+      const normalizedRoomId = normalizeRoomId(payload.roomId) || payload.roomId.trim();
+      const normalizedPlayerId = normalizePlayerId(payload.playerId) || payload.playerId.trim();
 
       const joinRequest: JoinRoomRequest = {
-        roomId: payload.roomId,
-        playerId: payload.playerId,
+        roomId: normalizedRoomId,
+        playerId: normalizedPlayerId,
         displayName: payload.displayName
       };
       client.publish({
@@ -206,6 +222,7 @@ class GameSocketClient {
   }
 
   private async disconnectInternal(resetSession: boolean) {
+    await this.demoClient.disconnect();
     await this.deactivateCurrentClient(true);
 
     useGameStore.getState().setConnection("idle");

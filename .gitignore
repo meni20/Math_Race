@@ -10,6 +10,8 @@ Thumbs.db
 # Environment
 .env
 .env.*
+!server/.env.example
+!client/.env.example
 
 # Server / Gradle
 server/.gradle/
@@ -29,3 +31,4 @@ client/codex_vehicle_debug*.png
 
 # Logs
 *.log
+.vercel

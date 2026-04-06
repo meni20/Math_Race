@@ -7,6 +7,7 @@ import { QuestionOverlay } from "./components/QuestionOverlay";
 import { gameSocket } from "./game/network/gameSocket";
 import { RaceScene } from "./game/scene/RaceScene";
 import { useGameStore } from "./game/store/useGameStore";
+import { normalizePlayerId, normalizeRoomId } from "./game/utils/gameIds";
 
 function parseBoolean(value: string | null) {
   if (!value) {
@@ -62,9 +63,9 @@ function App() {
       return;
     }
 
-    const roomId = params.get("room")?.trim() || "arena-1";
+    const roomId = normalizeRoomId(params.get("room")?.trim() || "arena-1");
     const displayName = params.get("name")?.trim() || "Debug Racer";
-    const playerId = params.get("player")?.trim() || "p-debug-1";
+    const playerId = normalizePlayerId(params.get("player")?.trim() || "p-debug-1");
 
     autoJoinAttemptedRef.current = true;
     prepareJoin(roomId, displayName, playerId);

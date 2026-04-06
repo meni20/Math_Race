@@ -1,6 +1,8 @@
 import { FormEvent, useMemo, useState } from "react";
 import { gameSocket } from "../game/network/gameSocket";
+import { isDemoTransportConfigured } from "../game/network/transportConfig";
 import { useGameStore } from "../game/store/useGameStore";
+import { normalizeRoomId } from "../game/utils/gameIds";
 
 function buildPlayerId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -11,12 +13,6 @@ function buildPlayerId() {
 
 function buildSoloRoomId(playerId: string) {
   return `solo-${playerId}`;
-}
-
-function normalizeRoomId(roomId: string) {
-  const trimmed = roomId.trim();
-  const sanitized = trimmed.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-{2,}/g, "-");
-  return sanitized.slice(0, 64);
 }
 
 export function LobbyPanel() {
@@ -30,6 +26,7 @@ export function LobbyPanel() {
   const [nameInput, setNameInput] = useState(displayName || "Neon Racer");
   const connecting = connection === "connecting";
   const connected = connection === "connected";
+  const demoMode = isDemoTransportConfigured();
 
   const badgeClass = useMemo(() => {
     if (connection === "connected") {
@@ -117,7 +114,7 @@ export function LobbyPanel() {
             disabled={connecting}
             className="rounded-lg border border-cyan-300/60 bg-cyan-400/25 px-3 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-cyan-50 shadow-neon transition hover:bg-cyan-300/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {connected ? "Reconnect" : "Join Race"}
+            {connected ? "Restart Race" : demoMode ? "Start Race" : "Join Race"}
           </button>
           <button
             type="button"
@@ -138,7 +135,9 @@ export function LobbyPanel() {
       </form>
 
       <p className="mt-3 text-xs text-slate-300/90">
-        Play Solo uses a private room bound to your player ID. Join Race keeps normal shared-room multiplayer.
+        {demoMode
+          ? "Hosted demo mode is active on this site. Join Race and Play Solo both start an in-browser race with AI rivals."
+          : "Play Solo uses a private room bound to your player ID. Join Race keeps normal shared-room multiplayer."}
       </p>
     </section>
   );

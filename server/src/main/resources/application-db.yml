@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/asphalt8}
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:asphalt8}}
     username: ${DB_USER:postgres}
     password: ${DB_PASS:postgres}
   jpa:

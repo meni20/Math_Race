@@ -4,6 +4,12 @@ export interface JoinRoomRequest {
   displayName: string;
 }
 
+export interface ConnectPayload {
+  roomId: string;
+  playerId: string;
+  displayName: string;
+}
+
 export interface RoomJoinedMessage {
   roomId: string;
   targetPlayerId: string;

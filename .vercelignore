@@ -1,0 +1,15 @@
+.agents
+.git
+.vercel-global
+plugins
+scripts
+server
+frontend.live.err.log
+frontend.live.log
+GAME_SPEC.md
+README.md
+client/dist
+client/node_modules
+client/*.log
+client/*.png
+client/*.tsbuildinfo

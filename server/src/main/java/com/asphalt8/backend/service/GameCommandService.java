@@ -4,6 +4,7 @@ import com.asphalt8.backend.game.dto.AnswerFeedbackMessage;
 import com.asphalt8.backend.game.dto.AnswerSubmissionRequest;
 import com.asphalt8.backend.game.dto.DecisionChoiceRequest;
 import com.asphalt8.backend.game.dto.JoinRoomRequest;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,13 @@ public class GameCommandService {
     public void handleJoin(JoinRoomRequest request, String principalName) {
         if (!inboundRateLimiter.allow(principalName, "join", 500L)) {
             log.warn("Dropped game.join by rate limiter for principal={}", principalName);
+            sendJoinError(
+                principalName,
+                request.roomId(),
+                request.playerId(),
+                "JOIN_RATE_LIMITED",
+                "Join rejected: too many requests. Please retry in a moment."
+            );
             return;
         }
 
@@ -45,6 +53,13 @@ public class GameCommandService {
             normalizedPlayerId = GameInputValidator.normalizePlayerId(request.playerId(), false);
         } catch (IllegalArgumentException ex) {
             log.warn("Rejected game.join principal={} because request normalization failed", principalName, ex);
+            sendJoinError(
+                principalName,
+                request.roomId(),
+                request.playerId(),
+                "INVALID_JOIN_REQUEST",
+                "Join rejected: invalid room or player id."
+            );
             return;
         }
         String normalizedDisplayName = GameInputValidator.normalizeDisplayName(request.displayName(), normalizedPlayerId);
@@ -62,21 +77,14 @@ public class GameCommandService {
                 normalizedPlayerId,
                 bindResult.errorCode()
             );
-            sendToPrincipal(
+            sendJoinError(
                 principalName,
-                "/queue/game.error",
-                Map.of(
-                    "code",
-                    bindResult.errorCode() == null ? "BIND_REJECTED" : bindResult.errorCode(),
-                    "message",
-                    bindResult.errorMessage() == null
-                        ? "Join rejected: player is already active in another session."
-                        : bindResult.errorMessage(),
-                    "roomId",
-                    normalizedRoomId,
-                    "playerId",
-                    normalizedPlayerId
-                )
+                normalizedRoomId,
+                normalizedPlayerId,
+                bindResult.errorCode() == null ? "BIND_REJECTED" : bindResult.errorCode(),
+                bindResult.errorMessage() == null
+                    ? "Join rejected: player is already active in another session."
+                    : bindResult.errorMessage()
             );
             return;
         }
@@ -204,5 +212,24 @@ public class GameCommandService {
     private void sendToPrincipal(String principalName, String destination, Object payload) {
         log.info("Sending destination={} to principal={}", destination, principalName);
         messagingTemplate.convertAndSendToUser(principalName, destination, payload);
+    }
+
+    private void sendJoinError(
+        String principalName,
+        String roomId,
+        String playerId,
+        String code,
+        String message
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("code", code);
+        payload.put("message", message);
+        if (roomId != null) {
+            payload.put("roomId", roomId);
+        }
+        if (playerId != null) {
+            payload.put("playerId", playerId);
+        }
+        sendToPrincipal(principalName, "/queue/game.error", payload);
     }
 }
