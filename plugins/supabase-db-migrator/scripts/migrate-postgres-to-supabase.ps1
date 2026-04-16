@@ -25,12 +25,36 @@ function Write-Step {
     Write-Host "[supabase-db-migrator] $Message"
 }
 
-function Require-Command {
+function Resolve-CommandPath {
     param([string]$Name)
 
-    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        throw "Required command '$Name' was not found on PATH. Install PostgreSQL client tools before running this migration."
+    $resolved = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($resolved) {
+        return $resolved.Source
     }
+
+    $executableName = if ($Name.EndsWith(".exe")) { $Name } else { "$Name.exe" }
+    $candidateDirectories = @(
+        (Join-Path ${env:ProgramFiles} "PostgreSQL"),
+        (Join-Path ${env:ProgramFiles(x86)} "PostgreSQL")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $matches = foreach ($directory in $candidateDirectories) {
+        Get-ChildItem -Path $directory -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object {
+                $candidate = Join-Path $_.FullName "bin\$executableName"
+                if (Test-Path $candidate) {
+                    $candidate
+                }
+            }
+    }
+
+    if ($matches) {
+        return $matches[0]
+    }
+
+    throw "Required command '$Name' was not found on PATH or in the standard PostgreSQL install directories."
 }
 
 function Invoke-Checked {
@@ -148,11 +172,12 @@ FROM counts;
 function Get-TableCounts {
     param(
         [string]$DbUrl,
-        [object[]]$QualifiedTables
+        [object[]]$QualifiedTables,
+        [string]$PsqlExecutable
     )
 
     $sql = Build-CountQuery -QualifiedTables $QualifiedTables
-    $result = & psql "--dbname=$DbUrl" "--tuples-only" "--no-align" "--quiet" "--command=$sql"
+    $result = & $PsqlExecutable "--dbname=$DbUrl" "--tuples-only" "--no-align" "--quiet" "--command=$sql"
     if ($LASTEXITCODE -ne 0) {
         throw "Row-count verification query failed."
     }
@@ -191,9 +216,9 @@ function Save-Json {
     $Value | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 $Path
 }
 
-Require-Command "pg_dump"
-Require-Command "pg_restore"
-Require-Command "psql"
+$pgDump = Resolve-CommandPath "pg_dump"
+$pgRestore = Resolve-CommandPath "pg_restore"
+$psql = Resolve-CommandPath "psql"
 
 $qualifiedTables = @()
 foreach ($table in $Tables) {
@@ -209,7 +234,7 @@ $reportPath = Join-Path $artifactDirectory "migration-report.json"
 
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 
-$sourceCounts = Get-TableCounts -DbUrl $SourceDbUrl -QualifiedTables $qualifiedTables
+$sourceCounts = Get-TableCounts -DbUrl $SourceDbUrl -QualifiedTables $qualifiedTables -PsqlExecutable $psql
 Save-Json -Path $sourceCountsPath -Value $sourceCounts
 
 $dumpArguments = @(
@@ -226,7 +251,7 @@ foreach ($table in $Tables) {
     $dumpArguments += "--table=$table"
 }
 
-Invoke-Checked -Executable "pg_dump" -Arguments $dumpArguments -Label "Creating source dump"
+Invoke-Checked -Executable $pgDump -Arguments $dumpArguments -Label "Creating source dump"
 
 if (-not $SkipRestore) {
     $restoreArguments = @(
@@ -253,7 +278,7 @@ if (-not $SkipRestore) {
         )
     }
 
-    Invoke-Checked -Executable "pg_restore" -Arguments $restoreArguments -Label "Restoring dump into Supabase"
+    Invoke-Checked -Executable $pgRestore -Arguments $restoreArguments -Label "Restoring dump into Supabase"
 }
 
 $verificationStatus = "skipped"
@@ -261,7 +286,7 @@ $mismatches = @()
 $targetCounts = @()
 
 if (-not $SkipVerify) {
-    $targetCounts = Get-TableCounts -DbUrl $TargetDbUrl -QualifiedTables $qualifiedTables
+    $targetCounts = Get-TableCounts -DbUrl $TargetDbUrl -QualifiedTables $qualifiedTables -PsqlExecutable $psql
     Save-Json -Path $targetCountsPath -Value $targetCounts
 
     $sourceMap = ConvertTo-CountMap -Counts $sourceCounts

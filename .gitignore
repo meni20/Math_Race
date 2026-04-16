@@ -12,6 +12,7 @@ Thumbs.db
 .env.*
 !server/.env.example
 !client/.env.example
+!client/.env.production
 
 # Server / Gradle
 server/.gradle/

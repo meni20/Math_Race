@@ -14,7 +14,8 @@ import type {
   RoomJoinedMessage
 } from "../types/messages";
 import { DemoRaceClient } from "./demoRace";
-import { getGameBackendUrl } from "./transportConfig";
+import { SupabaseGameClient } from "./supabaseGame";
+import { getConfiguredGameTransport, getGameBackendUrl } from "./transportConfig";
 
 interface GameErrorMessage {
   code?: string;
@@ -30,6 +31,7 @@ class GameSocketClient {
   private lifecycle: Promise<void> = Promise.resolve();
   private connectionGeneration = 0;
   private demoClient = new DemoRaceClient();
+  private supabaseClient = new SupabaseGameClient();
 
   connect(payload: ConnectPayload) {
     this.lifecycle = this.lifecycle.then(() => this.connectInternal(payload));
@@ -42,7 +44,13 @@ class GameSocketClient {
   }
 
   submitAnswer(answer: string) {
-    if (getGameBackendUrl() === null) {
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.submitAnswer(answer);
+      return;
+    }
+
+    if (transport === "demo") {
       this.demoClient.submitAnswer(answer);
       return;
     }
@@ -65,7 +73,13 @@ class GameSocketClient {
   }
 
   submitDecision(choice: "HIGHWAY" | "DIRT") {
-    if (getGameBackendUrl() === null) {
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.submitDecision(choice);
+      return;
+    }
+
+    if (transport === "demo") {
       this.demoClient.submitDecision(choice);
       return;
     }
@@ -158,10 +172,17 @@ class GameSocketClient {
   }
 
   private async connectInternal(payload: ConnectPayload) {
+    await this.supabaseClient.disconnect();
     await this.demoClient.disconnect();
     await this.deactivateCurrentClient(false);
     this.intentionalDisconnect = false;
     useGameStore.getState().setConnection("connecting");
+
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      await this.supabaseClient.connect(payload);
+      return;
+    }
 
     const backendUrl = getGameBackendUrl();
     if (!backendUrl) {
@@ -222,6 +243,7 @@ class GameSocketClient {
   }
 
   private async disconnectInternal(resetSession: boolean) {
+    await this.supabaseClient.disconnect();
     await this.demoClient.disconnect();
     await this.deactivateCurrentClient(true);
 
