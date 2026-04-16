@@ -26,6 +26,7 @@ interface AnswerFeedbackState {
 
 interface GameStore {
   connection: ConnectionStatus;
+  connectionErrorMessage: string;
   roomId: string;
   playerId: string;
   displayName: string;
@@ -48,7 +49,7 @@ interface GameStore {
   questionReceivedAtMs: number;
   decision: DecisionPointMessage | null;
   answerFeedback: AnswerFeedbackState | null;
-  setConnection: (status: ConnectionStatus) => void;
+  setConnection: (status: ConnectionStatus, errorMessage?: string) => void;
   prepareJoin: (roomId: string, displayName: string, playerId: string) => void;
   applyJoin: (message: RoomJoinedMessage) => void;
   applyStateUpdate: (message: GameStateUpdateMessage) => void;
@@ -65,6 +66,7 @@ interface GameStore {
 
 const initialState = {
   connection: "idle" as ConnectionStatus,
+  connectionErrorMessage: "",
   roomId: "",
   playerId: "",
   displayName: "",
@@ -91,8 +93,13 @@ const initialState = {
 
 export const useGameStore = create<GameStore>((set, get) => ({
   ...initialState,
-  setConnection: (status) => {
-    set({ connection: status });
+  setConnection: (status, errorMessage) => {
+    set({
+      connection: status,
+      connectionErrorMessage: status === "error"
+        ? (errorMessage?.trim() || "Connection error.")
+        : ""
+    });
   },
   prepareJoin: (roomId, displayName, playerId) => {
     const normalizedRoomId = normalizeRoomId(roomId);
@@ -126,6 +133,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       playerId: message.targetPlayerId,
       displayName: message.displayName,
       connection: "connected",
+      connectionErrorMessage: "",
       baseSpeedMps: Number.isFinite(message.baseSpeedMps) ? Math.max(0, message.baseSpeedMps) : initialState.baseSpeedMps,
       totalLaps: message.totalLaps,
       trackLengthMeters: message.trackLengthMeters

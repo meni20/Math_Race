@@ -611,6 +611,21 @@ export function joinRoom(
   advanceRoomToNow(room, now);
 
   let player = room.players[request.playerId] ?? null;
+  const joinPhase = room.racePhase;
+  const isExistingMember = Boolean(player);
+  if (!isExistingMember && joinPhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      response: errorResponse(
+        "ROOM_MEMBERSHIP_LOCKED",
+        `Join rejected: room is in ${joinPhase}. New players can only join while the room is in the lobby.`,
+        room.roomId,
+        request.playerId
+      )
+    };
+  }
+
   if (player?.session && player.session.sessionId !== request.sessionId && isFreshSession(player.session, now)) {
     return {
       persist: false,

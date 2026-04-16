@@ -21,6 +21,7 @@ function formatCountdown(ms: number) {
 
 export function LobbyPanel() {
   const connection = useGameStore((state) => state.connection);
+  const connectionErrorMessage = useGameStore((state) => state.connectionErrorMessage);
   const roomId = useGameStore((state) => state.roomId);
   const displayName = useGameStore((state) => state.displayName);
   const playerId = useGameStore((state) => state.playerId);
@@ -255,6 +256,11 @@ export function LobbyPanel() {
       <p className="mt-3 text-xs text-slate-300/90">
         Join a room to enter the pre-race lobby, stage the cars, and start when the room is ready.
       </p>
+      {connection === "error" && connectionErrorMessage ? (
+        <p className="mt-3 rounded-lg border border-rose-400/45 bg-rose-500/12 px-3 py-2 text-xs text-rose-100">
+          {connectionErrorMessage}
+        </p>
+      ) : null}
     </section>
   );
 }

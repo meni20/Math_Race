@@ -75,7 +75,7 @@ export class SupabaseGameClient {
       this.startSyncLoop();
     } catch (error) {
       console.warn("[supabase] join-game failed", error);
-      useGameStore.getState().setConnection("error");
+      useGameStore.getState().setConnection("error", "Unable to join room. Please retry.");
       this.currentSessionId = null;
       this.currentConnectPayload = null;
     }
@@ -243,7 +243,7 @@ export class SupabaseGameClient {
       const code = response.error.code ?? "UNKNOWN";
       const detail = response.error.message?.trim() || "Supabase backend rejected the request.";
       console.warn(`[supabase.error] ${code}: ${detail}`);
-      useGameStore.getState().setConnection("error");
+      useGameStore.getState().setConnection("error", detail);
       return false;
     }
 
