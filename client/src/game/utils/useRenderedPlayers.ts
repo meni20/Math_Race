@@ -33,8 +33,10 @@ export function useRenderedPlayers() {
   const playerSyncMeta = useGameStore((state) => state.playerSyncMeta);
   const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
+  const racePhase = useGameStore((state) => state.racePhase);
   const raceStopped = useGameStore((state) => state.raceStopped);
   const nowMs = useAnimatedNow(Boolean(playerIds.length || playerId));
+  const motionPaused = raceStopped || racePhase !== "active";
 
   const renderedPlayers = useMemo(() => {
     const nextPlayers: Record<string, PlayerSnapshot> = {};
@@ -45,7 +47,7 @@ export function useRenderedPlayers() {
         playerSyncMeta[currentPlayerId],
         localMotionPrediction,
         trackLengthMeters,
-        raceStopped,
+        motionPaused,
         nowMs
       );
       if (renderedPlayer) {
@@ -59,7 +61,7 @@ export function useRenderedPlayers() {
         playerSyncMeta[playerId],
         localMotionPrediction,
         trackLengthMeters,
-        raceStopped,
+        motionPaused,
         nowMs
       );
       if (renderedPlayer) {
@@ -68,7 +70,7 @@ export function useRenderedPlayers() {
     }
 
     return nextPlayers;
-  }, [localMotionPrediction, nowMs, playerId, playerIds, playerSyncMeta, players, raceStopped, trackLengthMeters]);
+  }, [localMotionPrediction, motionPaused, nowMs, playerId, playerIds, playerSyncMeta, players, trackLengthMeters]);
 
   return {
     nowMs,

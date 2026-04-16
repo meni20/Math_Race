@@ -411,6 +411,9 @@ verify_jwt = false
 [functions.submit-decision]
 verify_jwt = false
 
+[functions.start-race]
+verify_jwt = false
+
 [functions.sync-room]
 verify_jwt = false
 

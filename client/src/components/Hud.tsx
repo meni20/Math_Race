@@ -30,6 +30,7 @@ function formatDistance(meters: number) {
 }
 
 export function Hud() {
+  const racePhase = useGameStore((state) => state.racePhase);
   const latestTick = useGameStore((state) => state.latestTick);
   const totalLaps = useGameStore((state) => state.totalLaps);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
@@ -59,6 +60,10 @@ export function Hud() {
       })
       .slice(0, 4);
   }, [players, totalLaps, trackLengthMeters]);
+
+  if (racePhase === "lobby" || racePhase === "starting") {
+    return null;
+  }
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-4 p-4">

@@ -7,6 +7,7 @@ import type {
   GameStateUpdateMessage,
   PlayerSnapshot,
   QuestionMessage,
+  RacePhase,
   RoomJoinedMessage
 } from "../types/messages";
 
@@ -38,6 +39,8 @@ interface DemoSession {
   localPlayerId: string;
   trackLengthMeters: number;
   totalLaps: number;
+  racePhase: RacePhase;
+  raceStartingAtMs: number;
   raceStartedAtMs: number;
   raceStopped: boolean;
   raceStoppedAtMs: number;
@@ -53,6 +56,7 @@ interface DemoSession {
 const TICK_MS = 100;
 const DEMO_TRACK_LENGTH_METERS = 1400;
 const DEMO_TOTAL_LAPS = 1;
+const DEMO_START_COUNTDOWN_MS = 2600;
 const DEMO_DECISION_PROMPT = "Choose your route";
 const DEMO_DECISION_OPTIONS = ["HIGHWAY", "DIRT"];
 
@@ -143,6 +147,8 @@ function buildStateMessage(session: DemoSession): GameStateUpdateMessage {
     roomId: session.roomId,
     serverTimeMs: Date.now(),
     tick: session.tick,
+    racePhase: session.racePhase,
+    raceStartingAtMs: session.raceStartingAtMs,
     raceStartedAtMs: session.raceStartedAtMs,
     raceStopped: session.raceStopped,
     raceStoppedAtMs: session.raceStoppedAtMs,
@@ -206,13 +212,15 @@ export class DemoRaceClient {
         localPlayerId: payload.playerId,
         trackLengthMeters: DEMO_TRACK_LENGTH_METERS,
         totalLaps: DEMO_TOTAL_LAPS,
-        raceStartedAtMs: now,
+        racePhase: "lobby",
+        raceStartingAtMs: 0,
+        raceStartedAtMs: 0,
         raceStopped: false,
         raceStoppedAtMs: 0,
         winnerPlayerId: null,
         tick: 0,
         players: [localPlayer, ...createAiPlayers(payload.roomId, payload.playerId)],
-        nextEventAtMs: now + 4000,
+        nextEventAtMs: now,
         eventCount: 0,
         pendingQuestion: null,
         pendingDecision: null
@@ -295,6 +303,28 @@ export class DemoRaceClient {
     this.openQuestion(session, now, true);
   }
 
+  startRace() {
+    const session = this.session;
+    if (!session || session.racePhase !== "lobby") {
+      return;
+    }
+
+    const now = Date.now();
+    session.racePhase = "starting";
+    session.raceStartingAtMs = now + DEMO_START_COUNTDOWN_MS;
+    session.raceStartedAtMs = 0;
+    session.raceStopped = false;
+    session.raceStoppedAtMs = 0;
+    session.winnerPlayerId = null;
+    session.pendingQuestion = null;
+    session.pendingDecision = null;
+    session.nextEventAtMs = session.raceStartingAtMs + 4000;
+    this.lastTickAtMs = now;
+    useGameStore.getState().clearQuestion();
+    useGameStore.getState().clearDecision();
+    useGameStore.getState().applyStateUpdate(buildStateMessage(session));
+  }
+
   private tick(token: number) {
     if (token !== this.sessionToken || !this.session) {
       return;
@@ -305,7 +335,11 @@ export class DemoRaceClient {
     const deltaSeconds = Math.max(0.04, Math.min(0.18, (now - this.lastTickAtMs) / 1000));
     this.lastTickAtMs = now;
 
-    if (!session.raceStopped) {
+    if (session.racePhase === "starting" && now >= session.raceStartingAtMs) {
+      this.activateRace(session, session.raceStartingAtMs || now);
+    }
+
+    if (session.racePhase === "active" && !session.raceStopped) {
       this.advancePlayers(session, now, deltaSeconds);
       this.processPendingState(session, now);
       this.maybeOpenEvent(session, now);
@@ -356,6 +390,8 @@ export class DemoRaceClient {
     }
 
     if (raceWinner) {
+      session.racePhase = "finish";
+      session.raceStartingAtMs = 0;
       session.raceStopped = true;
       session.raceStoppedAtMs = now;
       session.winnerPlayerId = raceWinner.playerId;
@@ -367,6 +403,10 @@ export class DemoRaceClient {
   }
 
   private processPendingState(session: DemoSession, now: number) {
+    if (session.racePhase !== "active") {
+      return;
+    }
+
     if (session.pendingQuestion && now > session.pendingQuestion.expiresAtMs) {
       this.expireQuestion(session, now);
     }
@@ -380,6 +420,10 @@ export class DemoRaceClient {
   }
 
   private maybeOpenEvent(session: DemoSession, now: number) {
+    if (session.racePhase !== "active") {
+      return;
+    }
+
     if (session.pendingQuestion || session.pendingDecision || now < session.nextEventAtMs) {
       return;
     }
@@ -463,5 +507,20 @@ export class DemoRaceClient {
 
     player.temporaryDeltaMps = deltaMps;
     player.temporaryDeltaEndsAtMs = Date.now() + durationMs;
+  }
+
+  private activateRace(session: DemoSession, startAtMs: number) {
+    session.racePhase = "active";
+    session.raceStartingAtMs = 0;
+    session.raceStartedAtMs = startAtMs;
+    session.raceStopped = false;
+    session.raceStoppedAtMs = 0;
+    session.winnerPlayerId = null;
+    session.pendingQuestion = null;
+    session.pendingDecision = null;
+    session.nextEventAtMs = startAtMs + 4000;
+    this.lastTickAtMs = startAtMs;
+    useGameStore.getState().clearQuestion();
+    useGameStore.getState().clearDecision();
   }
 }

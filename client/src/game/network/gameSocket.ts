@@ -103,6 +103,32 @@ class GameSocketClient {
     });
   }
 
+  startRace() {
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.startRace();
+      return;
+    }
+
+    if (transport === "demo") {
+      this.demoClient.startRace();
+      return;
+    }
+
+    const state = useGameStore.getState();
+    if (!this.client || !this.client.connected || !state.roomId || !state.playerId) {
+      return;
+    }
+
+    this.client.publish({
+      destination: "/app/game.start",
+      body: JSON.stringify({
+        roomId: state.roomId,
+        playerId: state.playerId
+      })
+    });
+  }
+
   private clearSubscriptions() {
     for (const subscription of this.personalSubscriptions) {
       try {

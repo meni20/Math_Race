@@ -1,3 +1,5 @@
+export type RacePhase = "lobby" | "starting" | "active" | "finish";
+
 export interface JoinRoomRequest {
   roomId: string;
   playerId: string;
@@ -8,6 +10,11 @@ export interface ConnectPayload {
   roomId: string;
   playerId: string;
   displayName: string;
+}
+
+export interface StartRaceRequest {
+  roomId: string;
+  playerId: string;
 }
 
 export interface RoomJoinedMessage {
@@ -47,6 +54,8 @@ export interface GameStateUpdateMessage {
   roomId: string;
   serverTimeMs: number;
   tick: number;
+  racePhase: RacePhase;
+  raceStartingAtMs: number;
   raceStartedAtMs: number;
   raceStopped: boolean;
   raceStoppedAtMs: number;

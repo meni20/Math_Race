@@ -5,6 +5,7 @@ import type {
   GameStateUpdateMessage,
   PlayerSnapshot,
   QuestionMessage,
+  RacePhase,
   RoomJoinedMessage
 } from "../types/messages";
 import {
@@ -29,6 +30,8 @@ interface GameStore {
   playerId: string;
   displayName: string;
   baseSpeedMps: number;
+  racePhase: RacePhase;
+  raceStartingAtMs: number;
   raceStartedAtMs: number;
   raceFinishedAtMs: number | null;
   racePlacement: number | null;
@@ -66,6 +69,8 @@ const initialState = {
   playerId: "",
   displayName: "",
   baseSpeedMps: 42,
+  racePhase: "lobby" as RacePhase,
+  raceStartingAtMs: 0,
   raceStartedAtMs: 0,
   raceFinishedAtMs: null as number | null,
   racePlacement: null as number | null,
@@ -96,6 +101,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       roomId: normalizedRoomId,
       displayName: displayName.trim(),
       playerId: normalizedPlayerId,
+      racePhase: "lobby",
+      raceStartingAtMs: 0,
       raceStartedAtMs: 0,
       raceFinishedAtMs: null,
       racePlacement: null,
@@ -132,6 +139,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const raceStopped = Boolean(message.raceStopped);
       const raceStoppedAtMs = typeof message.raceStoppedAtMs === "number" ? message.raceStoppedAtMs : 0;
+      const racePhase = normalizeRacePhase(message.racePhase, raceStopped, message.raceStartedAtMs);
+      const raceStartingAtMs = racePhase === "starting" && Number.isFinite(message.raceStartingAtMs)
+        ? Math.max(0, message.raceStartingAtMs)
+        : 0;
       const raceStartedAtFromServer = typeof message.raceStartedAtMs === "number" ? message.raceStartedAtMs : 0;
       const receivedAtMs = Date.now();
       const winnerPlayerId = message.winnerPlayerId ?? "";
@@ -160,16 +171,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         incomingIds.length !== state.playerIds.length ||
         incomingIds.some((id) => !state.playerIds.includes(id));
 
-      const localPlayer = state.playerId ? playersById[state.playerId] : undefined;
-      const previousLocal = state.playerId ? state.players[state.playerId] : undefined;
-
-      let raceStartedAtMs = raceStartedAtFromServer > 0
-        ? raceStartedAtFromServer
-        : state.raceStartedAtMs;
-      if (!raceStartedAtMs && localPlayer) {
-        raceStartedAtMs = Date.now();
-      }
-
       const sortedStandings = Object.values(playersById).sort((a, b) => {
         if (a.lap !== b.lap) {
           return b.lap - a.lap;
@@ -183,19 +184,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       let decision = state.decision;
       let localMotionPrediction = state.localMotionPrediction;
 
-      const raceRestarted = state.raceStopped && !raceStopped;
-      if (raceRestarted) {
-        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : Date.now();
+      let raceStartedAtMs = state.raceStartedAtMs;
+      if (racePhase === "active") {
+        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : state.raceStartedAtMs;
         raceFinishedAtMs = null;
         racePlacement = null;
-        if (question && question.expiresAtMs <= raceStartedAtMs) {
-          question = null;
-        }
-        decision = null;
-        localMotionPrediction = null;
-      }
-
-      if (raceStopped) {
+      } else if (racePhase === "finish") {
+        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : state.raceStartedAtMs;
         raceFinishedAtMs = raceStoppedAtMs > 0
           ? raceStoppedAtMs
           : (state.raceFinishedAtMs ?? Date.now());
@@ -204,16 +199,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
         question = null;
         decision = null;
         localMotionPrediction = null;
-      }
-
-      if (!raceStopped && previousLocal?.finished && localPlayer && !localPlayer.finished) {
-        raceStartedAtMs = raceStartedAtFromServer > 0 ? raceStartedAtFromServer : Date.now();
+      } else {
+        raceStartedAtMs = 0;
         raceFinishedAtMs = null;
         racePlacement = null;
+        question = null;
+        decision = null;
         localMotionPrediction = null;
       }
 
-      if (localMotionPrediction) {
+      if (racePhase === "active" && localMotionPrediction) {
         const localMeta = playerSyncMeta[state.playerId];
         if (
           !playersById[state.playerId]
@@ -230,6 +225,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         playerSyncMeta,
         localMotionPrediction,
         latestTick: message.tick,
+        racePhase,
+        raceStartingAtMs,
         raceStartedAtMs,
         raceFinishedAtMs,
         racePlacement,
@@ -241,20 +238,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
   applyQuestion: (message) => {
-    if (message.targetPlayerId !== get().playerId) {
+    const state = get();
+    if (message.targetPlayerId !== state.playerId || state.racePhase !== "active") {
       return;
     }
-    set((state) => ({
+    set((currentState) => ({
       question: message,
       questionReceivedAtMs: Date.now(),
       decision: null,
-      localMotionPrediction: state.localMotionPrediction?.kind === "decision"
+      localMotionPrediction: currentState.localMotionPrediction?.kind === "decision"
         ? null
-        : state.localMotionPrediction
+        : currentState.localMotionPrediction
     }));
   },
   applyDecision: (message) => {
-    if (message.targetPlayerId !== get().playerId) {
+    const state = get();
+    if (message.targetPlayerId !== state.playerId || state.racePhase !== "active") {
       return;
     }
     set({
@@ -279,7 +278,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const question = state.question;
     const localPlayer = state.players[state.playerId];
-    if (!question || !localPlayer) {
+    if (state.racePhase !== "active" || !question || !localPlayer) {
       return;
     }
 
@@ -300,7 +299,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const decision = state.decision;
     const localPlayer = state.players[state.playerId];
-    if (!decision || !localPlayer) {
+    if (state.racePhase !== "active" || !decision || !localPlayer) {
       return;
     }
 
@@ -337,4 +336,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
 function latestTickChanged(nextTick: number, previousTick: number) {
   return Number.isFinite(nextTick) && nextTick !== previousTick;
+}
+
+function normalizeRacePhase(
+  phase: GameStateUpdateMessage["racePhase"] | undefined,
+  raceStopped: boolean,
+  raceStartedAtMs: number
+): RacePhase {
+  if (phase === "lobby" || phase === "starting" || phase === "active" || phase === "finish") {
+    return phase;
+  }
+  if (raceStopped) {
+    return "finish";
+  }
+  if (Number.isFinite(raceStartedAtMs) && raceStartedAtMs > 0) {
+    return "active";
+  }
+  return "lobby";
 }

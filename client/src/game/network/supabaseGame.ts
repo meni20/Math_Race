@@ -139,12 +139,27 @@ export class SupabaseGameClient {
     }
   }
 
+  async startRace() {
+    const sessionPayload = this.getSessionPayload();
+    if (!sessionPayload) {
+      return;
+    }
+
+    try {
+      const response = await this.invoke("start-race", sessionPayload);
+      this.applyResponse(response);
+    } catch (error) {
+      console.warn("[supabase] start-race failed", error);
+      useGameStore.getState().setConnection("error");
+    }
+  }
+
   private startSyncLoop() {
     this.stopSyncLoop();
     const generation = ++this.syncGeneration;
     this.syncIntervalId = window.setInterval(() => {
       void this.sync(generation);
-    }, 500);
+    }, 250);
   }
 
   private stopSyncLoop() {

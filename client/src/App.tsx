@@ -21,6 +21,7 @@ function DebugOverlay() {
   const connection = useGameStore((state) => state.connection);
   const roomId = useGameStore((state) => state.roomId);
   const playerId = useGameStore((state) => state.playerId);
+  const racePhase = useGameStore((state) => state.racePhase);
   const { playerIds, localPlayer } = useRenderedPlayers();
 
   return (
@@ -28,6 +29,7 @@ function DebugOverlay() {
       <p>connection: {connection}</p>
       <p>room: {roomId || "-"}</p>
       <p>player: {playerId || "-"}</p>
+      <p>phase: {racePhase}</p>
       <p>players: {playerIds.length}</p>
       <p>local present: {localPlayer ? "yes" : "no"}</p>
       <p>lane: {localPlayer?.laneIndex ?? "-"}</p>

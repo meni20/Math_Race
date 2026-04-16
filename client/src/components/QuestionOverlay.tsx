@@ -3,6 +3,7 @@ import { gameSocket } from "../game/network/gameSocket";
 import { useGameStore } from "../game/store/useGameStore";
 
 export function QuestionOverlay() {
+  const racePhase = useGameStore((state) => state.racePhase);
   const question = useGameStore((state) => state.question);
   const questionReceivedAtMs = useGameStore((state) => state.questionReceivedAtMs);
   const [answer, setAnswer] = useState("");
@@ -39,7 +40,7 @@ export function QuestionOverlay() {
     setAnswer("");
   };
 
-  if (!question) {
+  if (!question || racePhase !== "active") {
     return null;
   }
 

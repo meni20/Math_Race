@@ -1,3 +1,5 @@
+export type RacePhase = "lobby" | "starting" | "active" | "finish";
+
 export interface JoinRoomRequest {
   roomId: string;
   playerId: string;
@@ -13,6 +15,8 @@ export interface SyncRoomRequest {
   playerId: string;
   sessionId: string;
 }
+
+export interface StartRaceRequest extends SyncRoomRequest {}
 
 export interface AnswerSubmissionRequest extends SyncRoomRequest {
   questionId: string;
@@ -47,6 +51,8 @@ export interface GameStateUpdateMessage {
   roomId: string;
   serverTimeMs: number;
   tick: number;
+  racePhase: RacePhase;
+  raceStartingAtMs: number;
   raceStartedAtMs: number;
   raceStopped: boolean;
   raceStoppedAtMs: number;
@@ -154,6 +160,8 @@ export interface GameRoomStateRecord {
   createdAtMs: number;
   tick: number;
   resultPersisted: boolean;
+  racePhase: RacePhase;
+  raceStartingAtMs: number;
   raceStopped: boolean;
   raceStartedAtMs: number;
   raceStoppedAtMs: number;

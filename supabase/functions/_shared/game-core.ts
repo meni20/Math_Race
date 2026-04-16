@@ -15,6 +15,7 @@ import type {
   PlayerStateRecord,
   QuestionMessage,
   RaceHistoryRow,
+  RacePhase,
   RoomJoinedMessage,
   RoomMutationResult
 } from "./contracts.ts";
@@ -43,6 +44,7 @@ const DECISION_RATE_LIMIT_MS = 120;
 const MAX_ADVANCE_STEP_MS = 250;
 const DEFAULT_TRACK_LENGTH_METERS = 3000;
 const DEFAULT_TOTAL_LAPS = 1;
+const RACE_START_COUNTDOWN_MS = 2600;
 const HIGHWAY_CHOICE = "HIGHWAY";
 const DIRT_CHOICE = "DIRT";
 
@@ -64,6 +66,10 @@ function sortedPlayers(room: GameRoomStateRecord) {
     }
     return left.playerId.localeCompare(right.playerId);
   });
+}
+
+function isRaceActive(phase: RacePhase) {
+  return phase === "active";
 }
 
 function buildSession(previous: PlayerSessionRecord | null, sessionId: string, now: number): PlayerSessionRecord {
@@ -115,8 +121,10 @@ export function createRoomState(
     createdAtMs: now,
     tick: 0,
     resultPersisted: false,
+    racePhase: "lobby",
+    raceStartingAtMs: 0,
     raceStopped: false,
-    raceStartedAtMs: now,
+    raceStartedAtMs: 0,
     raceStoppedAtMs: 0,
     lastInteractionAtMs: now,
     winnerPlayerId: null,
@@ -168,6 +176,13 @@ function toDecisionMessage(roomId: string, player: PlayerStateRecord, point: Dec
 }
 
 function currentPrompt(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
+  if (!isRaceActive(room.racePhase) || room.raceStopped) {
+    return {
+      question: null,
+      decision: null
+    };
+  }
+
   const pendingDecision = player.pendingDecisionPoint;
   if (pendingDecision && now <= pendingDecision.expiresAtMs) {
     return {
@@ -250,8 +265,10 @@ function resetPlayerForNewRace(player: PlayerStateRecord) {
 
 function resetRoomForNewRace(room: GameRoomStateRecord, now: number) {
   room.resultPersisted = false;
+  room.racePhase = "lobby";
+  room.raceStartingAtMs = 0;
   room.raceStopped = false;
-  room.raceStartedAtMs = now;
+  room.raceStartedAtMs = 0;
   room.raceStoppedAtMs = 0;
   room.lastInteractionAtMs = now;
   room.tick = 0;
@@ -259,6 +276,43 @@ function resetRoomForNewRace(room: GameRoomStateRecord, now: number) {
   room.resultHistoryId = null;
   for (const player of Object.values(room.players)) {
     resetPlayerForNewRace(player);
+  }
+}
+
+function activateRace(room: GameRoomStateRecord, startAtMs: number) {
+  room.racePhase = "active";
+  room.raceStartingAtMs = 0;
+  room.raceStopped = false;
+  room.raceStartedAtMs = startAtMs;
+  room.raceStoppedAtMs = 0;
+  room.lastInteractionAtMs = startAtMs;
+  room.tick = 0;
+  room.winnerPlayerId = null;
+
+  for (const player of Object.values(room.players)) {
+    player.pendingDecisionPoint = null;
+    if (!player.finished) {
+      player.highwayChallengeActive = false;
+      if (!player.pendingQuestion) {
+        issueNewQuestion(player, 1, false, startAtMs);
+      }
+    }
+  }
+}
+
+function scheduleRaceStart(room: GameRoomStateRecord, now: number) {
+  room.resultPersisted = false;
+  room.racePhase = "starting";
+  room.raceStartingAtMs = now + RACE_START_COUNTDOWN_MS;
+  room.raceStopped = false;
+  room.raceStoppedAtMs = 0;
+  room.winnerPlayerId = null;
+  room.lastInteractionAtMs = now;
+
+  for (const player of Object.values(room.players)) {
+    player.pendingQuestion = null;
+    player.pendingDecisionPoint = null;
+    player.highwayChallengeActive = false;
   }
 }
 
@@ -280,6 +334,8 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
   }
 
   room.lastInteractionAtMs = now;
+  room.racePhase = "finish";
+  room.raceStartingAtMs = 0;
   room.raceStopped = true;
   room.raceStoppedAtMs = now;
   room.winnerPlayerId = winner.playerId;
@@ -296,7 +352,7 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
 }
 
 function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateRecord, deltaSeconds: number, now: number) {
-  if (room.raceStopped || player.finished) {
+  if (room.raceStopped || !isRaceActive(room.racePhase) || player.finished) {
     return null;
   }
 
@@ -350,7 +406,7 @@ function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateReco
 }
 
 function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (room.raceStopped || !player.pendingQuestion || now <= player.pendingQuestion.expiresAtMs) {
+  if (room.raceStopped || !isRaceActive(room.racePhase) || !player.pendingQuestion || now <= player.pendingQuestion.expiresAtMs) {
     return;
   }
 
@@ -361,7 +417,7 @@ function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRe
 }
 
 function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (room.raceStopped || !player.pendingDecisionPoint || now <= player.pendingDecisionPoint.expiresAtMs) {
+  if (room.raceStopped || !isRaceActive(room.racePhase) || !player.pendingDecisionPoint || now <= player.pendingDecisionPoint.expiresAtMs) {
     return;
   }
 
@@ -395,6 +451,25 @@ function advanceRoomToNow(room: GameRoomStateRecord, now: number) {
   pruneInactivePlayers(room, now);
 
   if (Object.keys(room.players).length === 0) {
+    room.lastInteractionAtMs = now;
+    return;
+  }
+
+  if (room.racePhase === "lobby") {
+    room.lastInteractionAtMs = now;
+    return;
+  }
+
+  if (room.racePhase === "starting") {
+    const startAtMs = room.raceStartingAtMs || now;
+    if (now < startAtMs) {
+      room.lastInteractionAtMs = now;
+      return;
+    }
+    activateRace(room, startAtMs);
+  }
+
+  if (!isRaceActive(room.racePhase)) {
     room.lastInteractionAtMs = now;
     return;
   }
@@ -466,6 +541,8 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     roomId: room.roomId,
     serverTimeMs: now,
     tick: room.tick,
+    racePhase: room.racePhase,
+    raceStartingAtMs: room.raceStartingAtMs,
     raceStartedAtMs: room.raceStartedAtMs,
     raceStopped: room.raceStopped,
     raceStoppedAtMs: room.raceStoppedAtMs,
@@ -531,7 +608,7 @@ export function joinRoom(
   now: number
 ): RoomMutationResult {
   const room = existingRoom ?? createRoomState(request.roomId, now);
-  pruneInactivePlayers(room, now);
+  advanceRoomToNow(room, now);
 
   let player = room.players[request.playerId] ?? null;
   if (player?.session && player.session.sessionId !== request.sessionId && isFreshSession(player.session, now)) {
@@ -563,10 +640,8 @@ export function joinRoom(
   }
 
   const displayName = normalizeDisplayName(request.displayName, request.playerId);
-  let raceRestarted = false;
   if (room.raceStopped) {
     resetRoomForNewRace(room, now);
-    raceRestarted = true;
     player = room.players[request.playerId] ?? null;
   }
 
@@ -585,19 +660,16 @@ export function joinRoom(
   player.session.lastJoinAtMs = now;
   room.lastInteractionAtMs = now;
 
-  if (raceRestarted) {
-    for (const racer of Object.values(room.players)) {
-      if (!racer.finished) {
-        issueNewQuestion(racer, 1, false, now);
-      }
-    }
-  } else {
+  if (room.racePhase === "active") {
     if (player.pendingDecisionPoint && now > player.pendingDecisionPoint.expiresAtMs) {
       player.pendingDecisionPoint = null;
     }
     if (!player.pendingQuestion || now > player.pendingQuestion.expiresAtMs) {
       issueNewQuestion(player, 1, false, now);
     }
+  } else {
+    player.pendingQuestion = null;
+    player.pendingDecisionPoint = null;
   }
 
   const prompt = currentPrompt(room, player, now);
@@ -615,6 +687,42 @@ export function joinRoom(
       decision: prompt.decision,
       error: null
     }
+  };
+}
+
+export function startRace(
+  existingRoom: GameRoomStateRecord | null,
+  request: { roomId: string; playerId: string; sessionId: string },
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId, request.playerId)
+    };
+  }
+
+  const room = existingRoom;
+  advanceRoomToNow(room, now);
+  const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, now);
+  if (!player) {
+    return {
+      persist: false,
+      room,
+      response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+
+  if (room.racePhase === "lobby") {
+    scheduleRaceStart(room, now);
+  }
+
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    response: buildResponseForPlayer(room, player, now)
   };
 }
 
@@ -695,7 +803,7 @@ export function submitAnswer(
   }
   room.lastInteractionAtMs = now;
 
-  if (player.finished || room.raceStopped) {
+  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase)) {
     return {
       persist: true,
       room,
@@ -826,7 +934,7 @@ export function submitDecision(
   }
   room.lastInteractionAtMs = now;
 
-  if (player.finished || room.raceStopped) {
+  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase)) {
     return {
       persist: true,
       room,

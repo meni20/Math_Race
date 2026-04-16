@@ -136,7 +136,7 @@ export function FinishOverlay() {
             onClick={handleRaceAgain}
             className="rounded-xl border border-cyan-200/60 bg-cyan-400/25 px-5 py-2 text-sm font-semibold uppercase tracking-[0.14em] text-cyan-50 transition hover:bg-cyan-300/35"
           >
-            Race Again
+            Return to Lobby
           </button>
         </div>
       </div>
