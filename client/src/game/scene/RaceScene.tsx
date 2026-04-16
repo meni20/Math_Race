@@ -436,20 +436,6 @@ function SideProgressMarkers() {
   const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
   const raceStopped = useGameStore((state) => state.raceStopped);
   const nowMs = useAnimatedNow(Boolean(playerId));
-
-  if (racePhase !== "active" && racePhase !== "finish") {
-    return null;
-  }
-
-  const localPlayer = getRenderedPlayerSnapshot(
-    players[playerId],
-    playerSyncMeta[playerId],
-    localMotionPrediction,
-    trackLengthMeters,
-    raceStopped || racePhase !== "active",
-    nowMs
-  );
-  const overallProgressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
   const markers = useMemo(
     () =>
       Array.from({ length: 10 }, (_, index) => {
@@ -465,6 +451,20 @@ function SideProgressMarkers() {
       }),
     [trackLengthMeters]
   );
+
+  if (racePhase !== "active" && racePhase !== "finish") {
+    return null;
+  }
+
+  const localPlayer = getRenderedPlayerSnapshot(
+    players[playerId],
+    playerSyncMeta[playerId],
+    localMotionPrediction,
+    trackLengthMeters,
+    raceStopped || racePhase !== "active",
+    nowMs
+  );
+  const overallProgressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
 
   return (
     <group>
@@ -543,11 +543,8 @@ function FinishGate() {
   const raceStopped = useGameStore((state) => state.raceStopped);
   const nowMs = useAnimatedNow(Boolean(playerId));
   const glowRef = useRef<PointLight>(null);
+  const gateVisible = racePhase === "active" || racePhase === "finish";
   const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
-
-  if (racePhase !== "active" && racePhase !== "finish") {
-    return null;
-  }
 
   const localPlayer = getRenderedPlayerSnapshot(
     players[playerId],
@@ -568,7 +565,7 @@ function FinishGate() {
   const gateZ = -trackLengthMeters * TRACK_Z_SCALE;
 
   useFrame(({ clock }) => {
-    if (!glowRef.current) {
+    if (!gateVisible || !glowRef.current) {
       return;
     }
     const pulseSpeed = raceFinished
@@ -584,6 +581,10 @@ function FinishGate() {
         : 5.2 + gateApproachFactor * 1.2;
     glowRef.current.intensity = Math.max(0.1, baseIntensity * pulse);
   });
+
+  if (!gateVisible) {
+    return null;
+  }
 
   return (
     <group>
