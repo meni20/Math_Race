@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { gameSocket } from "../game/network/gameSocket";
 import { useGameStore } from "../game/store/useGameStore";
+import { getPlayerRaceDistanceMeters } from "../game/utils/renderMotion";
+import { useRenderedPlayers } from "../game/utils/useRenderedPlayers";
 
 function formatDuration(ms: number) {
   const safeMs = Math.max(0, ms);
@@ -36,26 +38,27 @@ export function FinishOverlay() {
   const playerId = useGameStore((state) => state.playerId);
   const displayName = useGameStore((state) => state.displayName);
   const totalLaps = useGameStore((state) => state.totalLaps);
-  const players = useGameStore((state) => state.players);
+  const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const raceStartedAtMs = useGameStore((state) => state.raceStartedAtMs);
   const raceFinishedAtMs = useGameStore((state) => state.raceFinishedAtMs);
   const racePlacement = useGameStore((state) => state.racePlacement);
   const raceStopped = useGameStore((state) => state.raceStopped);
   const winnerPlayerId = useGameStore((state) => state.winnerPlayerId);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
+  const { players } = useRenderedPlayers();
 
-  const localPlayer = players[playerId];
+  const localPlayer = playerId ? players[playerId] : undefined;
   const winnerName = winnerPlayerId && players[winnerPlayerId] ? players[winnerPlayerId].displayName : undefined;
 
   const standings = useMemo(() => {
     return Object.values(players)
       .sort((a, b) => {
-        if (a.lap !== b.lap) {
-          return b.lap - a.lap;
-        }
-        return b.positionMeters - a.positionMeters;
+        return (
+          getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
+          - getPlayerRaceDistanceMeters(a, trackLengthMeters, totalLaps)
+        );
       });
-  }, [players]);
+  }, [players, totalLaps, trackLengthMeters]);
 
   if (!raceStopped || !localPlayer || !raceFinishedAtMs || raceStartedAtMs <= 0) {
     return null;

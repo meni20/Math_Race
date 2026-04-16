@@ -41,6 +41,14 @@ function clampSpeed(value: number) {
   return Math.max(0, value);
 }
 
+function clampLap(value: number, totalLaps: number) {
+  const safeTotalLaps = Math.max(1, Math.trunc(totalLaps));
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(safeTotalLaps - 1, Math.trunc(value)));
+}
+
 function parsePattern(prompt: string, pattern: RegExp, evaluator: (...values: number[]) => number, boostMultiplier: number) {
   const match = prompt.trim().match(pattern);
   if (!match) {
@@ -188,4 +196,69 @@ export function getRenderedPlayerSnapshot(
     positionMeters: clampMeters(predictedPositionMeters, safeTrackLengthMeters),
     speedMps: clampSpeed(predictedSpeedMps)
   };
+}
+
+export function getPlayerRaceDistanceMeters(
+  player: PlayerSnapshot | null | undefined,
+  trackLengthMeters: number,
+  totalLaps: number
+) {
+  if (!player) {
+    return 0;
+  }
+
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const safeTotalLaps = Math.max(1, Math.trunc(totalLaps));
+  const totalRaceDistanceMeters = safeTrackLengthMeters * safeTotalLaps;
+
+  if (player.finished) {
+    return totalRaceDistanceMeters;
+  }
+
+  const completedLaps = clampLap(player.lap, safeTotalLaps);
+  const positionMeters = clampMeters(player.positionMeters, safeTrackLengthMeters);
+  return Math.max(
+    0,
+    Math.min(totalRaceDistanceMeters, (completedLaps * safeTrackLengthMeters) + positionMeters)
+  );
+}
+
+export function getPlayerProgressRatio(
+  player: PlayerSnapshot | null | undefined,
+  trackLengthMeters: number,
+  totalLaps: number
+) {
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const safeTotalLaps = Math.max(1, Math.trunc(totalLaps));
+  const totalRaceDistanceMeters = safeTrackLengthMeters * safeTotalLaps;
+  return getPlayerRaceDistanceMeters(player, safeTrackLengthMeters, safeTotalLaps) / totalRaceDistanceMeters;
+}
+
+export function getDistanceToFinishMeters(
+  player: PlayerSnapshot | null | undefined,
+  trackLengthMeters: number,
+  totalLaps: number
+) {
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const safeTotalLaps = Math.max(1, Math.trunc(totalLaps));
+  const totalRaceDistanceMeters = safeTrackLengthMeters * safeTotalLaps;
+  return Math.max(
+    0,
+    totalRaceDistanceMeters - getPlayerRaceDistanceMeters(player, safeTrackLengthMeters, safeTotalLaps)
+  );
+}
+
+export function isPlayerOnFinalLap(
+  player: PlayerSnapshot | null | undefined,
+  trackLengthMeters: number,
+  totalLaps: number
+) {
+  if (!player || player.finished) {
+    return false;
+  }
+
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const safeTotalLaps = Math.max(1, Math.trunc(totalLaps));
+  const finalLapStartMeters = Math.max(0, safeTotalLaps - 1) * safeTrackLengthMeters;
+  return getPlayerRaceDistanceMeters(player, safeTrackLengthMeters, safeTotalLaps) >= finalLapStartMeters;
 }

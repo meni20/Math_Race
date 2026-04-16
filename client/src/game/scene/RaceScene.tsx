@@ -4,7 +4,13 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Group, MathUtils, PerspectiveCamera, PointLight, Vector3 } from "three";
 import { useMemo, useRef } from "react";
 import { useGameStore } from "../store/useGameStore";
-import { getRenderedPlayerSnapshot } from "../utils/renderMotion";
+import {
+  getDistanceToFinishMeters,
+  getPlayerProgressRatio,
+  getRenderedPlayerSnapshot,
+  isPlayerOnFinalLap
+} from "../utils/renderMotion";
+import { useAnimatedNow } from "../utils/useRenderedPlayers";
 
 const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
@@ -276,18 +282,20 @@ function SideProgressMarkers() {
   const totalLaps = useGameStore((state) => state.totalLaps);
   const playerId = useGameStore((state) => state.playerId);
   const players = useGameStore((state) => state.players);
+  const playerSyncMeta = useGameStore((state) => state.playerSyncMeta);
+  const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
+  const raceStopped = useGameStore((state) => state.raceStopped);
+  const nowMs = useAnimatedNow(Boolean(playerId));
 
-  const localPlayer = players[playerId];
-  const totalRaceDistance = Math.max(1, trackLengthMeters * Math.max(1, totalLaps));
-  const overallProgressRatio = localPlayer
-    ? Math.min(
-      1,
-      Math.max(
-        0,
-        ((localPlayer.lap * trackLengthMeters) + localPlayer.positionMeters) / totalRaceDistance
-      )
-    )
-    : 0;
+  const localPlayer = getRenderedPlayerSnapshot(
+    players[playerId],
+    playerSyncMeta[playerId],
+    localMotionPrediction,
+    trackLengthMeters,
+    raceStopped,
+    nowMs
+  );
+  const overallProgressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
   const markers = useMemo(
     () =>
       Array.from({ length: 10 }, (_, index) => {
@@ -307,20 +315,40 @@ function SideProgressMarkers() {
   return (
     <group>
       {markers.map((marker) => {
+        const approachFactor = MathUtils.clamp(
+          1 - (Math.abs(overallProgressRatio - marker.progressRatio) / 0.12),
+          0,
+          1
+        );
         const isPassed = marker.progressRatio <= overallProgressRatio;
         const panelColor = marker.progressRatio >= 1 ? "#1f5231" : isPassed ? "#13405f" : "#0f1b38";
-        const panelEmissive = marker.progressRatio >= 1 ? "#64ff84" : isPassed ? "#28f6ff" : "#0f1b38";
-        const textColor = marker.progressRatio >= 1 ? "#a9ffd0" : isPassed ? "#b9f5ff" : "#ffd58d";
+        const panelEmissive = marker.progressRatio >= 1
+          ? "#64ff84"
+          : (isPassed || approachFactor > 0 ? "#28f6ff" : "#0f1b38");
+        const panelEmissiveIntensity = marker.progressRatio >= 1
+          ? 0.6
+          : 0.16 + (isPassed ? 0.24 : 0) + (approachFactor * 0.26);
+        const textColor = marker.progressRatio >= 1
+          ? "#a9ffd0"
+          : (isPassed || approachFactor >= 0.65 ? "#b9f5ff" : "#ffd58d");
 
         return (
           <group key={marker.key} position={[0, 0, marker.z]}>
             <mesh position={[-7.7, 2.2, 0]} castShadow receiveShadow>
               <boxGeometry args={[1.6, 0.84, 0.12]} />
-              <meshStandardMaterial color={panelColor} emissive={panelEmissive} emissiveIntensity={0.45} />
+              <meshStandardMaterial
+                color={panelColor}
+                emissive={panelEmissive}
+                emissiveIntensity={panelEmissiveIntensity}
+              />
             </mesh>
             <mesh position={[7.7, 2.2, 0]} castShadow receiveShadow>
               <boxGeometry args={[1.6, 0.84, 0.12]} />
-              <meshStandardMaterial color={panelColor} emissive={panelEmissive} emissiveIntensity={0.45} />
+              <meshStandardMaterial
+                color={panelColor}
+                emissive={panelEmissive}
+                emissiveIntensity={panelEmissiveIntensity}
+              />
             </mesh>
 
             <Text
@@ -355,15 +383,27 @@ function FinishGate() {
   const totalLaps = useGameStore((state) => state.totalLaps);
   const playerId = useGameStore((state) => state.playerId);
   const players = useGameStore((state) => state.players);
+  const playerSyncMeta = useGameStore((state) => state.playerSyncMeta);
+  const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
+  const raceStopped = useGameStore((state) => state.raceStopped);
+  const nowMs = useAnimatedNow(Boolean(playerId));
 
-  const localPlayer = players[playerId];
-  const finalLapActive = Boolean(
-    localPlayer && !localPlayer.finished && localPlayer.lap >= Math.max(0, totalLaps - 1)
+  const localPlayer = getRenderedPlayerSnapshot(
+    players[playerId],
+    playerSyncMeta[playerId],
+    localMotionPrediction,
+    trackLengthMeters,
+    raceStopped,
+    nowMs
   );
-  const raceFinished = Boolean(localPlayer?.finished);
+  const progressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
+  const distanceToFinishMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
+  const gateApproachFactor = MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
+  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
+  const raceFinished = Boolean(localPlayer && (localPlayer.finished || progressRatio >= 0.999));
   const gateColor = raceFinished ? "#64ff84" : finalLapActive ? "#28f6ff" : "#ffc543";
   const supportColor = raceFinished ? "#95ffbe" : finalLapActive ? "#8be7ff" : "#ffd58d";
-  const haloOpacity = raceFinished ? 0.32 : finalLapActive ? 0.24 : 0.14;
+  const haloOpacity = raceFinished ? 0.32 : finalLapActive ? 0.18 + gateApproachFactor * 0.12 : 0.14 + gateApproachFactor * 0.04;
   const glowRef = useRef<PointLight>(null);
   const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
   const gateZ = -trackLengthMeters * TRACK_Z_SCALE;
@@ -372,9 +412,17 @@ function FinishGate() {
     if (!glowRef.current) {
       return;
     }
-    const pulseSpeed = raceFinished ? 4.2 : finalLapActive ? 6.2 : 2.4;
+    const pulseSpeed = raceFinished
+      ? 4.2
+      : finalLapActive
+        ? 5.2 + gateApproachFactor
+        : 2.4 + gateApproachFactor * 1.2;
     const pulse = 0.82 + Math.sin(clock.getElapsedTime() * pulseSpeed) * 0.22;
-    const baseIntensity = raceFinished ? 6.4 : finalLapActive ? 10.8 : 5.2;
+    const baseIntensity = raceFinished
+      ? 6.4
+      : finalLapActive
+        ? 8.6 + gateApproachFactor * 3.2
+        : 5.2 + gateApproachFactor * 1.2;
     glowRef.current.intensity = Math.max(0.1, baseIntensity * pulse);
   });
 
@@ -405,20 +453,37 @@ function FinishGate() {
 
         <mesh castShadow receiveShadow position={[0, 2.4, 0]}>
           <boxGeometry args={[12.8, 0.7, 0.62]} />
-          <meshStandardMaterial color={gateColor} emissive={gateColor} emissiveIntensity={0.64} metalness={0.35} />
+          <meshStandardMaterial
+            color={gateColor}
+            emissive={gateColor}
+            emissiveIntensity={raceFinished ? 0.82 : finalLapActive ? 0.52 + gateApproachFactor * 0.26 : 0.4 + gateApproachFactor * 0.12}
+            metalness={0.35}
+          />
         </mesh>
         <mesh position={[0, 2.41, -0.12]}>
           <boxGeometry args={[11.7, 0.18, 0.12]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={1.55} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 1.7 : finalLapActive ? 1.25 + gateApproachFactor * 0.5 : 1.1}
+          />
         </mesh>
 
         <mesh position={[-5.9, 2.7, 0]}>
           <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={2.3} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 2.5 : finalLapActive ? 1.95 + gateApproachFactor * 0.45 : 1.75}
+          />
         </mesh>
         <mesh position={[5.9, 2.7, 0]}>
           <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={2.3} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 2.5 : finalLapActive ? 1.95 + gateApproachFactor * 0.45 : 1.75}
+          />
         </mesh>
 
         <mesh position={[0, -2.56, 0]} rotation={[-Math.PI / 2, 0, 0]}>

@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useGameStore } from "../game/store/useGameStore";
+import {
+  getDistanceToFinishMeters,
+  getPlayerRaceDistanceMeters,
+  isPlayerOnFinalLap
+} from "../game/utils/renderMotion";
+import { useRenderedPlayers } from "../game/utils/useRenderedPlayers";
 
 function toKmh(speedMps: number) {
   return Math.round(speedMps * 3.6);
@@ -24,45 +30,35 @@ function formatDistance(meters: number) {
 }
 
 export function Hud() {
-  const playerId = useGameStore((state) => state.playerId);
-  const players = useGameStore((state) => state.players);
   const latestTick = useGameStore((state) => state.latestTick);
   const totalLaps = useGameStore((state) => state.totalLaps);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const feedback = useGameStore((state) => state.answerFeedback);
   const raceStartedAtMs = useGameStore((state) => state.raceStartedAtMs);
   const raceFinishedAtMs = useGameStore((state) => state.raceFinishedAtMs);
+  const { nowMs, players, localPlayer } = useRenderedPlayers();
 
-  const [clockNowMs, setClockNowMs] = useState(Date.now());
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => setClockNowMs(Date.now()), 250);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  const localPlayer = players[playerId];
-  const displayedLap = localPlayer ? Math.min(totalLaps, localPlayer.lap + 1) : 1;
-  const lapsRemainingToFinish = localPlayer ? Math.max(0, totalLaps - localPlayer.lap - 1) : Math.max(0, totalLaps - 1);
-  const clampedPositionMeters = localPlayer ? Math.min(trackLengthMeters, Math.max(0, localPlayer.positionMeters)) : 0;
-  const distanceToFinishGateMeters = localPlayer
-    ? localPlayer.finished
-      ? 0
-      : Math.max(0, lapsRemainingToFinish * trackLengthMeters + (trackLengthMeters - clampedPositionMeters))
-    : trackLengthMeters;
-  const finalLapActive = Boolean(localPlayer && !localPlayer.finished && localPlayer.lap >= Math.max(0, totalLaps - 1));
+  const displayedLap = localPlayer
+    ? Math.min(totalLaps, localPlayer.finished ? totalLaps : localPlayer.lap + 1)
+    : 1;
+  const distanceToFinishGateMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
+  const lapsRemainingToFinish = localPlayer
+    ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
+    : Math.max(0, totalLaps - 1);
+  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
   const raceElapsedMs = raceStartedAtMs
-    ? Math.max(0, (raceFinishedAtMs ?? clockNowMs) - raceStartedAtMs)
+    ? Math.max(0, (raceFinishedAtMs ?? nowMs) - raceStartedAtMs)
     : 0;
   const standings = useMemo(() => {
     return Object.values(players)
       .sort((a, b) => {
-        if (a.lap !== b.lap) {
-          return b.lap - a.lap;
-        }
-        return b.positionMeters - a.positionMeters;
+        return (
+          getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
+          - getPlayerRaceDistanceMeters(a, trackLengthMeters, totalLaps)
+        );
       })
       .slice(0, 4);
-  }, [players]);
+  }, [players, totalLaps, trackLengthMeters]);
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-4 p-4">
@@ -98,7 +94,7 @@ export function Hud() {
         </ul>
       </section>
 
-      {feedback && Date.now() - feedback.receivedAtMs < 1200 ? (
+      {feedback && nowMs - feedback.receivedAtMs < 1200 ? (
         <section
           className={`rounded-2xl border px-4 py-3 text-sm font-semibold backdrop-blur-xl ${
             feedback.correct
