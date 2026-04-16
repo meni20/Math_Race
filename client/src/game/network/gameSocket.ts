@@ -46,6 +46,7 @@ class GameSocketClient {
   submitAnswer(answer: string) {
     const transport = getConfiguredGameTransport();
     if (transport === "supabase") {
+      useGameStore.getState().beginLocalAnswerPrediction(answer);
       void this.supabaseClient.submitAnswer(answer);
       return;
     }
@@ -75,6 +76,7 @@ class GameSocketClient {
   submitDecision(choice: "HIGHWAY" | "DIRT") {
     const transport = getConfiguredGameTransport();
     if (transport === "supabase") {
+      useGameStore.getState().beginLocalDecisionPrediction(choice);
       void this.supabaseClient.submitDecision(choice);
       return;
     }

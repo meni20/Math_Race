@@ -4,6 +4,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Group, MathUtils, PerspectiveCamera, PointLight, Vector3 } from "three";
 import { useMemo, useRef } from "react";
 import { useGameStore } from "../store/useGameStore";
+import { getRenderedPlayerSnapshot } from "../utils/renderMotion";
 
 const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
@@ -168,14 +169,20 @@ function CarEntity({ playerId }: { playerId: string }) {
 
   useFrame((_, delta) => {
     const state = useGameStore.getState();
-    const player = state.players[playerId];
+    const player = getRenderedPlayerSnapshot(
+      state.players[playerId],
+      state.playerSyncMeta[playerId],
+      state.localMotionPrediction,
+      state.trackLengthMeters,
+      state.raceStopped,
+      Date.now()
+    );
     if (!player || !groupRef.current) {
       return;
     }
 
-    const blend = 1 - Math.exp(-delta * 10);
-    speedRef.current = MathUtils.lerp(speedRef.current, player.speedMps, blend);
-    positionRef.current = MathUtils.lerp(positionRef.current, player.positionMeters, blend);
+    speedRef.current = MathUtils.damp(speedRef.current, player.speedMps, 8.5, delta);
+    positionRef.current = MathUtils.damp(positionRef.current, player.positionMeters, 10.5, delta);
 
     const z = -positionRef.current * TRACK_Z_SCALE;
     const x = laneToX(player.laneIndex);
@@ -430,7 +437,14 @@ function CameraRig() {
 
   useFrame(({ camera }, delta) => {
     const game = useGameStore.getState();
-    const localPlayer = game.players[game.playerId];
+    const localPlayer = getRenderedPlayerSnapshot(
+      game.players[game.playerId],
+      game.playerSyncMeta[game.playerId],
+      game.localMotionPrediction,
+      game.trackLengthMeters,
+      game.raceStopped,
+      Date.now()
+    );
     if (!localPlayer) {
       return;
     }
