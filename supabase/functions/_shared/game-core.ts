@@ -72,6 +72,47 @@ function isRaceActive(phase: RacePhase) {
   return phase === "active";
 }
 
+function normalizeStoredPlayerRacePhase(player: PlayerStateRecord, room: GameRoomStateRecord): RacePhase {
+  if (
+    player.racePhase === "lobby"
+    || player.racePhase === "starting"
+    || player.racePhase === "active"
+    || player.racePhase === "finish"
+  ) {
+    return player.racePhase;
+  }
+
+  if (player.finished || room.raceStopped || room.racePhase === "finish") {
+    return "finish";
+  }
+  if (room.racePhase === "starting") {
+    return "starting";
+  }
+  if (room.racePhase === "active") {
+    return "active";
+  }
+  return "lobby";
+}
+
+function hydratePlayerRacePhases(room: GameRoomStateRecord) {
+  for (const player of Object.values(room.players)) {
+    player.racePhase = normalizeStoredPlayerRacePhase(player, room);
+  }
+}
+
+function allPlayersInLobby(room: GameRoomStateRecord) {
+  const players = Object.values(room.players);
+  return players.length > 0 && players.every((player) => player.racePhase === "lobby");
+}
+
+function anyPlayersStillRacing(room: GameRoomStateRecord) {
+  return Object.values(room.players).some((player) => (
+    player.racePhase === "starting"
+    || player.racePhase === "active"
+    || player.racePhase === "finish"
+  ));
+}
+
 function buildSession(previous: PlayerSessionRecord | null, sessionId: string, now: number): PlayerSessionRecord {
   return {
     sessionId,
@@ -104,6 +145,7 @@ function createPlayerState(playerId: string, displayName: string, laneIndex: num
     pendingDecisionPoint: null,
     decisionCooldownUntilMs: 0,
     highwayChallengeActive: false,
+    racePhase: "lobby",
     session: null
   };
 }
@@ -176,7 +218,7 @@ function toDecisionMessage(roomId: string, player: PlayerStateRecord, point: Dec
 }
 
 function currentPrompt(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (!isRaceActive(room.racePhase) || room.raceStopped) {
+  if (!isRaceActive(room.racePhase) || room.raceStopped || player.racePhase !== "active") {
     return {
       question: null,
       decision: null
@@ -261,6 +303,7 @@ function resetPlayerForNewRace(player: PlayerStateRecord) {
   player.pendingDecisionPoint = null;
   player.decisionCooldownUntilMs = 0;
   player.highwayChallengeActive = false;
+  player.racePhase = "lobby";
 }
 
 function resetRoomForNewRace(room: GameRoomStateRecord, now: number) {
@@ -290,6 +333,7 @@ function activateRace(room: GameRoomStateRecord, startAtMs: number) {
   room.winnerPlayerId = null;
 
   for (const player of Object.values(room.players)) {
+    player.racePhase = "active";
     player.pendingDecisionPoint = null;
     if (!player.finished) {
       player.highwayChallengeActive = false;
@@ -305,14 +349,16 @@ function scheduleRaceStart(room: GameRoomStateRecord, now: number) {
   room.racePhase = "starting";
   room.raceStartingAtMs = now + RACE_START_COUNTDOWN_MS;
   room.raceStopped = false;
+  room.raceStartedAtMs = 0;
   room.raceStoppedAtMs = 0;
   room.winnerPlayerId = null;
   room.lastInteractionAtMs = now;
+  room.tick = 0;
+  room.resultHistoryId = null;
 
   for (const player of Object.values(room.players)) {
-    player.pendingQuestion = null;
-    player.pendingDecisionPoint = null;
-    player.highwayChallengeActive = false;
+    resetPlayerForNewRace(player);
+    player.racePhase = "starting";
   }
 }
 
@@ -342,9 +388,12 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
   room.resultHistoryId = room.resultHistoryId ?? buildHistoryId(room.roomId, room.raceStartedAtMs);
 
   for (const player of Object.values(room.players)) {
-    player.speedMps = 0;
-    player.boostUntilMs = 0;
-    player.boostSpeedMps = player.baseSpeedMps;
+    if (player.racePhase === "active" || player.racePhase === "starting") {
+      player.racePhase = "finish";
+      player.speedMps = 0;
+      player.boostUntilMs = 0;
+      player.boostSpeedMps = player.baseSpeedMps;
+    }
     player.pendingQuestion = null;
     player.pendingDecisionPoint = null;
     player.highwayChallengeActive = false;
@@ -352,7 +401,7 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
 }
 
 function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateRecord, deltaSeconds: number, now: number) {
-  if (room.raceStopped || !isRaceActive(room.racePhase) || player.finished) {
+  if (room.raceStopped || !isRaceActive(room.racePhase) || player.finished || player.racePhase !== "active") {
     return null;
   }
 
@@ -406,7 +455,13 @@ function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateReco
 }
 
 function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (room.raceStopped || !isRaceActive(room.racePhase) || !player.pendingQuestion || now <= player.pendingQuestion.expiresAtMs) {
+  if (
+    room.raceStopped
+    || !isRaceActive(room.racePhase)
+    || player.racePhase !== "active"
+    || !player.pendingQuestion
+    || now <= player.pendingQuestion.expiresAtMs
+  ) {
     return;
   }
 
@@ -417,7 +472,13 @@ function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRe
 }
 
 function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (room.raceStopped || !isRaceActive(room.racePhase) || !player.pendingDecisionPoint || now <= player.pendingDecisionPoint.expiresAtMs) {
+  if (
+    room.raceStopped
+    || !isRaceActive(room.racePhase)
+    || player.racePhase !== "active"
+    || !player.pendingDecisionPoint
+    || now <= player.pendingDecisionPoint.expiresAtMs
+  ) {
     return;
   }
 
@@ -449,9 +510,16 @@ function pruneInactivePlayers(room: GameRoomStateRecord, now: number) {
 
 function advanceRoomToNow(room: GameRoomStateRecord, now: number) {
   pruneInactivePlayers(room, now);
+  hydratePlayerRacePhases(room);
 
   if (Object.keys(room.players).length === 0) {
+    resetRoomForNewRace(room, now);
     room.lastInteractionAtMs = now;
+    return;
+  }
+
+  if (allPlayersInLobby(room) && room.racePhase !== "lobby") {
+    resetRoomForNewRace(room, now);
     return;
   }
 
@@ -461,6 +529,10 @@ function advanceRoomToNow(room: GameRoomStateRecord, now: number) {
   }
 
   if (room.racePhase === "starting") {
+    if (!Object.values(room.players).some((player) => player.racePhase === "starting")) {
+      resetRoomForNewRace(room, now);
+      return;
+    }
     const startAtMs = room.raceStartingAtMs || now;
     if (now < startAtMs) {
       room.lastInteractionAtMs = now;
@@ -533,7 +605,8 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
       positionMeters: round(safePosition),
       speedMps: round(Math.max(0, sanitizeFinite(player.speedMps, 0))),
       lap: safeLap,
-      finished: player.finished
+      finished: player.finished,
+      racePhase: normalizeStoredPlayerRacePhase(player, room)
     };
   });
 
@@ -655,27 +728,18 @@ export function joinRoom(
   }
 
   const displayName = normalizeDisplayName(request.displayName, request.playerId);
-  if (room.raceStopped) {
-    resetRoomForNewRace(room, now);
-    player = room.players[request.playerId] ?? null;
-  }
-
   if (!player) {
     player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % 4);
     room.players[player.playerId] = player;
   } else {
     player.displayName = displayName;
-    if (player.finished) {
-      resetPlayerForNewRace(player);
-      room.resultPersisted = false;
-    }
   }
 
   player.session = buildSession(player.session, request.sessionId, now);
   player.session.lastJoinAtMs = now;
   room.lastInteractionAtMs = now;
 
-  if (room.racePhase === "active") {
+  if (room.racePhase === "active" && player.racePhase === "active") {
     if (player.pendingDecisionPoint && now > player.pendingDecisionPoint.expiresAtMs) {
       player.pendingDecisionPoint = null;
     }
@@ -729,10 +793,23 @@ export function startRace(
     };
   }
 
-  if (room.racePhase === "lobby") {
-    scheduleRaceStart(room, now);
+  if (room.racePhase !== "lobby" || !allPlayersInLobby(room)) {
+    return {
+      persist: false,
+      room,
+      response: {
+        ...buildResponseForPlayer(room, player, now),
+        error: {
+          code: "ROOM_NOT_READY",
+          message: "Race can only start when all room members are back in the lobby.",
+          roomId: room.roomId,
+          playerId: request.playerId
+        }
+      }
+    };
   }
 
+  scheduleRaceStart(room, now);
   room.lastInteractionAtMs = now;
   return {
     persist: true,
@@ -818,7 +895,7 @@ export function submitAnswer(
   }
   room.lastInteractionAtMs = now;
 
-  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase)) {
+  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase) || player.racePhase !== "active") {
     return {
       persist: true,
       room,
@@ -949,7 +1026,7 @@ export function submitDecision(
   }
   room.lastInteractionAtMs = now;
 
-  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase)) {
+  if (player.finished || room.raceStopped || !isRaceActive(room.racePhase) || player.racePhase !== "active") {
     return {
       persist: true,
       room,
@@ -1007,8 +1084,9 @@ export function leaveRoom(
   }
 
   const room = existingRoom;
-  const player = room.players[request.playerId] ?? null;
-  if (!player || !player.session || player.session.sessionId !== request.sessionId) {
+  advanceRoomToNow(room, now);
+  const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, now);
+  if (!player) {
     return {
       persist: false,
       room,
@@ -1021,6 +1099,9 @@ export function leaveRoom(
     room.winnerPlayerId = null;
   }
   rebalanceLanes(room);
+  if (!anyPlayersStillRacing(room)) {
+    resetRoomForNewRace(room, now);
+  }
   room.lastInteractionAtMs = now;
   return {
     persist: true,
@@ -1031,6 +1112,46 @@ export function leaveRoom(
       decision: null,
       error: null
     }
+  };
+}
+
+export function returnPlayerToLobby(
+  existingRoom: GameRoomStateRecord | null,
+  request: { roomId: string; playerId: string; sessionId: string },
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId, request.playerId)
+    };
+  }
+
+  const room = existingRoom;
+  advanceRoomToNow(room, now);
+  const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, now);
+  if (!player) {
+    return {
+      persist: false,
+      room,
+      response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+
+  resetPlayerForNewRace(player);
+  player.racePhase = "lobby";
+  player.session = buildSession(player.session, request.sessionId, now);
+  room.lastInteractionAtMs = now;
+
+  if (!anyPlayersStillRacing(room)) {
+    resetRoomForNewRace(room, now);
+  }
+
+  return {
+    persist: true,
+    room,
+    response: buildResponseForPlayer(room, player, now)
   };
 }
 

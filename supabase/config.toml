@@ -419,3 +419,6 @@ verify_jwt = false
 
 [functions.leave-game]
 verify_jwt = false
+
+[functions.return-to-lobby]
+verify_jwt = false

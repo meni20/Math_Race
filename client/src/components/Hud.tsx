@@ -52,6 +52,7 @@ export function Hud() {
     : 0;
   const standings = useMemo(() => {
     return Object.values(players)
+      .filter((player) => player.racePhase !== "lobby")
       .sort((a, b) => {
         return (
           getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)

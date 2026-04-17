@@ -15,3 +15,7 @@ export function normalizeRoomId(roomId: string) {
 export function normalizePlayerId(playerId: string) {
   return normalizeId(playerId);
 }
+
+export function isSoloRoomId(roomId: string) {
+  return roomId.startsWith("solo-");
+}

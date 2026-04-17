@@ -45,6 +45,7 @@ export interface PlayerSnapshot {
   speedMps: number;
   lap: number;
   finished: boolean;
+  racePhase: RacePhase;
 }
 
 export interface GameStateUpdateMessage {
@@ -150,6 +151,7 @@ export interface PlayerStateRecord {
   pendingDecisionPoint: DecisionPointRecord | null;
   decisionCooldownUntilMs: number;
   highwayChallengeActive: boolean;
+  racePhase: RacePhase;
   session: PlayerSessionRecord | null;
 }
 

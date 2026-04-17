@@ -129,6 +129,26 @@ class GameSocketClient {
     });
   }
 
+  returnToLobby() {
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.returnToLobby();
+      return;
+    }
+
+    if (transport === "demo") {
+      this.demoClient.returnToLobby();
+      return;
+    }
+
+    this.disconnect(false);
+  }
+
+  leaveRoom() {
+    this.lifecycle = this.lifecycle.then(() => this.leaveRoomInternal());
+    return this.lifecycle;
+  }
+
   private clearSubscriptions() {
     for (const subscription of this.personalSubscriptions) {
       try {
@@ -279,6 +299,15 @@ class GameSocketClient {
     if (resetSession) {
       useGameStore.getState().resetSession();
     }
+  }
+
+  private async leaveRoomInternal() {
+    await this.supabaseClient.disconnect();
+    await this.demoClient.disconnect();
+    await this.deactivateCurrentClient(true);
+
+    useGameStore.getState().setConnection("idle");
+    useGameStore.getState().resetSession();
   }
 
   private async deactivateCurrentClient(intentional: boolean) {

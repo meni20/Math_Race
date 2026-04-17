@@ -14,9 +14,10 @@ import {
   type LocalMotionPrediction,
   type PlayerSyncMeta
 } from "../utils/renderMotion";
-import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
+import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
+type SessionMode = "personal" | "shared" | "solo";
 
 interface AnswerFeedbackState {
   correct: boolean;
@@ -27,10 +28,12 @@ interface AnswerFeedbackState {
 interface GameStore {
   connection: ConnectionStatus;
   connectionErrorMessage: string;
+  sessionMode: SessionMode;
   roomId: string;
   playerId: string;
   displayName: string;
   baseSpeedMps: number;
+  roomRacePhase: RacePhase;
   racePhase: RacePhase;
   raceStartingAtMs: number;
   raceStartedAtMs: number;
@@ -67,10 +70,12 @@ interface GameStore {
 const initialState = {
   connection: "idle" as ConnectionStatus,
   connectionErrorMessage: "",
+  sessionMode: "personal" as SessionMode,
   roomId: "",
   playerId: "",
   displayName: "",
   baseSpeedMps: 42,
+  roomRacePhase: "lobby" as RacePhase,
   racePhase: "lobby" as RacePhase,
   raceStartingAtMs: 0,
   raceStartedAtMs: 0,
@@ -105,9 +110,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const normalizedRoomId = normalizeRoomId(roomId);
     const normalizedPlayerId = normalizePlayerId(playerId);
     set({
+      sessionMode: deriveSessionMode(normalizedRoomId),
       roomId: normalizedRoomId,
       displayName: displayName.trim(),
       playerId: normalizedPlayerId,
+      roomRacePhase: "lobby",
       racePhase: "lobby",
       raceStartingAtMs: 0,
       raceStartedAtMs: 0,
@@ -129,6 +136,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
   applyJoin: (message) => {
     set({
+      sessionMode: deriveSessionMode(message.roomId),
       roomId: message.roomId,
       playerId: message.targetPlayerId,
       displayName: message.displayName,
@@ -147,10 +155,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const raceStopped = Boolean(message.raceStopped);
       const raceStoppedAtMs = typeof message.raceStoppedAtMs === "number" ? message.raceStoppedAtMs : 0;
-      const racePhase = normalizeRacePhase(message.racePhase, raceStopped, message.raceStartedAtMs);
-      const raceStartingAtMs = racePhase === "starting" && Number.isFinite(message.raceStartingAtMs)
-        ? Math.max(0, message.raceStartingAtMs)
-        : 0;
+      const roomRacePhase = normalizeRacePhase(message.racePhase, raceStopped, message.raceStartedAtMs);
       const raceStartedAtFromServer = typeof message.raceStartedAtMs === "number" ? message.raceStartedAtMs : 0;
       const receivedAtMs = Date.now();
       const winnerPlayerId = message.winnerPlayerId ?? "";
@@ -162,11 +167,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
           : 0;
         const safePosition = Number.isFinite(player.positionMeters) ? Math.max(0, player.positionMeters) : 0;
         const safeSpeed = Number.isFinite(player.speedMps) ? Math.max(0, player.speedMps) : 0;
+        const safeRacePhase = normalizePlayerRacePhase(
+          player.racePhase,
+          roomRacePhase,
+          raceStopped,
+          raceStartedAtFromServer,
+          Boolean(player.finished)
+        );
         playersById[player.playerId] = {
           ...player,
           laneIndex: safeLaneIndex,
           positionMeters: safePosition,
-          speedMps: safeSpeed
+          speedMps: safeSpeed,
+          racePhase: safeRacePhase
         };
         playerSyncMeta[player.playerId] = {
           receivedAtMs,
@@ -174,17 +187,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
 
+      const localPlayer = state.playerId ? playersById[state.playerId] : undefined;
+      const racePhase = normalizePlayerRacePhase(
+        localPlayer?.racePhase,
+        roomRacePhase,
+        raceStopped,
+        raceStartedAtFromServer,
+        Boolean(localPlayer?.finished)
+      );
+      const raceStartingAtMs = racePhase === "starting" && Number.isFinite(message.raceStartingAtMs)
+        ? Math.max(0, message.raceStartingAtMs)
+        : 0;
+
       const incomingIds = message.players.map((player) => player.playerId);
       const idsChanged =
         incomingIds.length !== state.playerIds.length ||
         incomingIds.some((id) => !state.playerIds.includes(id));
 
-      const sortedStandings = Object.values(playersById).sort((a, b) => {
+      const sortedStandings = Object.values(playersById)
+        .filter((player) => player.racePhase !== "lobby" || player.finished)
+        .sort((a, b) => {
         if (a.lap !== b.lap) {
           return b.lap - a.lap;
         }
         return b.positionMeters - a.positionMeters;
-      });
+        });
 
       let raceFinishedAtMs = state.raceFinishedAtMs;
       let racePlacement = state.racePlacement;
@@ -233,6 +260,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         playerSyncMeta,
         localMotionPrediction,
         latestTick: message.tick,
+        roomRacePhase,
         racePhase,
         raceStartingAtMs,
         raceStartedAtMs,
@@ -336,7 +364,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   resetSession: () => {
     set({
       ...initialState,
-      roomId: get().roomId,
       displayName: get().displayName
     });
   }
@@ -361,4 +388,33 @@ function normalizeRacePhase(
     return "active";
   }
   return "lobby";
+}
+
+function normalizePlayerRacePhase(
+  phase: RacePhase | undefined,
+  roomRacePhase: RacePhase,
+  raceStopped: boolean,
+  raceStartedAtMs: number,
+  finished: boolean
+): RacePhase {
+  if (phase === "lobby" || phase === "starting" || phase === "active" || phase === "finish") {
+    return phase;
+  }
+  if (finished || raceStopped || roomRacePhase === "finish") {
+    return "finish";
+  }
+  if (roomRacePhase === "starting") {
+    return "starting";
+  }
+  if (roomRacePhase === "active" || (Number.isFinite(raceStartedAtMs) && raceStartedAtMs > 0)) {
+    return "active";
+  }
+  return "lobby";
+}
+
+function deriveSessionMode(roomId: string): SessionMode {
+  if (!roomId) {
+    return "personal";
+  }
+  return isSoloRoomId(roomId) ? "solo" : "shared";
 }

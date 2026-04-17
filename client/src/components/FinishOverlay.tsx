@@ -34,9 +34,8 @@ function toOrdinal(value: number) {
 }
 
 export function FinishOverlay() {
-  const roomId = useGameStore((state) => state.roomId);
   const playerId = useGameStore((state) => state.playerId);
-  const displayName = useGameStore((state) => state.displayName);
+  const sessionMode = useGameStore((state) => state.sessionMode);
   const totalLaps = useGameStore((state) => state.totalLaps);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const raceStartedAtMs = useGameStore((state) => state.raceStartedAtMs);
@@ -44,7 +43,6 @@ export function FinishOverlay() {
   const racePlacement = useGameStore((state) => state.racePlacement);
   const raceStopped = useGameStore((state) => state.raceStopped);
   const winnerPlayerId = useGameStore((state) => state.winnerPlayerId);
-  const prepareJoin = useGameStore((state) => state.prepareJoin);
   const { players } = useRenderedPlayers();
 
   const localPlayer = playerId ? players[playerId] : undefined;
@@ -52,6 +50,7 @@ export function FinishOverlay() {
 
   const standings = useMemo(() => {
     return Object.values(players)
+      .filter((player) => player.racePhase !== "lobby" || player.finished)
       .sort((a, b) => {
         return (
           getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
@@ -66,17 +65,12 @@ export function FinishOverlay() {
 
   const elapsedMs = Math.max(0, raceFinishedAtMs - raceStartedAtMs);
 
-  const handleRaceAgain = () => {
-    if (!roomId || !playerId) {
+  const handleReturn = () => {
+    if (sessionMode === "shared") {
+      gameSocket.returnToLobby();
       return;
     }
-    const safeDisplayName = displayName || "Neon Racer";
-    prepareJoin(roomId, safeDisplayName, playerId);
-    gameSocket.connect({
-      roomId,
-      playerId,
-      displayName: safeDisplayName
-    });
+    void gameSocket.leaveRoom();
   };
 
   return (
@@ -133,10 +127,10 @@ export function FinishOverlay() {
         <div className="mt-5 flex justify-end">
           <button
             type="button"
-            onClick={handleRaceAgain}
+            onClick={handleReturn}
             className="rounded-xl border border-cyan-200/60 bg-cyan-400/25 px-5 py-2 text-sm font-semibold uppercase tracking-[0.14em] text-cyan-50 transition hover:bg-cyan-300/35"
           >
-            Return to Lobby
+            {sessionMode === "shared" ? "Return to Lobby" : "Return to Personal Lobby"}
           </button>
         </div>
       </div>

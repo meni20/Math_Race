@@ -227,7 +227,8 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
     }
 
     const nowMs = Date.now();
-    const motionPaused = state.raceStopped || state.racePhase !== "active";
+    const playerRacePhase = player.racePhase ?? state.racePhase;
+    const motionPaused = state.raceStopped || playerRacePhase !== "active";
     const renderedPlayer = getRenderedPlayerSnapshot(
       player,
       state.playerSyncMeta[playerId],
@@ -245,16 +246,16 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
     let targetScaleZ = 1;
     let lightIntensity = 5.2;
 
-    if (state.racePhase === "lobby" || state.racePhase === "starting") {
+    if (playerRacePhase === "lobby" || playerRacePhase === "starting") {
       const transform = getLobbyToTrackTransform(
         slotIndex,
         totalPlayers,
         player.laneIndex,
-        state.racePhase,
+        playerRacePhase,
         state.raceStartingAtMs,
         nowMs
       );
-      const idleLift = state.racePhase === "lobby"
+      const idleLift = playerRacePhase === "lobby"
         ? Math.sin((nowMs / 380) + slotIndex) * 0.05
         : Math.sin((nowMs / 420) + slotIndex) * 0.015;
       const lobbyYaw = transform.lobbyX > 0 ? -0.28 : transform.lobbyX < 0 ? 0.28 : 0;

@@ -22,11 +22,13 @@ function formatCountdown(ms: number) {
 export function LobbyPanel() {
   const connection = useGameStore((state) => state.connection);
   const connectionErrorMessage = useGameStore((state) => state.connectionErrorMessage);
+  const sessionMode = useGameStore((state) => state.sessionMode);
   const roomId = useGameStore((state) => state.roomId);
   const displayName = useGameStore((state) => state.displayName);
   const playerId = useGameStore((state) => state.playerId);
   const playerIds = useGameStore((state) => state.playerIds);
   const players = useGameStore((state) => state.players);
+  const roomRacePhase = useGameStore((state) => state.roomRacePhase);
   const racePhase = useGameStore((state) => state.racePhase);
   const raceStartingAtMs = useGameStore((state) => state.raceStartingAtMs);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
@@ -37,8 +39,9 @@ export function LobbyPanel() {
   const connecting = connection === "connecting";
   const connected = connection === "connected";
   const demoMode = isDemoTransportConfigured();
-  const inLobbyFlow = connected && (racePhase === "lobby" || racePhase === "starting");
+  const inRoomLobbyFlow = connected && sessionMode !== "personal" && (racePhase === "lobby" || racePhase === "starting");
   const isActiveRace = connected && racePhase === "active";
+  const isSharedSession = sessionMode === "shared";
 
   useEffect(() => {
     setRoomInput(roomId || "arena-1");
@@ -96,8 +99,16 @@ export function LobbyPanel() {
     });
   };
 
-  const onDisconnect = () => {
-    gameSocket.disconnect(false);
+  const onLeaveRoom = () => {
+    void gameSocket.leaveRoom();
+  };
+
+  const onExitRace = () => {
+    if (isSharedSession) {
+      gameSocket.returnToLobby();
+      return;
+    }
+    void gameSocket.leaveRoom();
   };
 
   const onPlaySolo = () => {
@@ -123,29 +134,48 @@ export function LobbyPanel() {
     gameSocket.startRace();
   };
 
+  const allPlayersInLobby = roster.length > 0 && roster.every((player) => player.racePhase === "lobby");
+  const canStartRace = racePhase === "lobby" && (!isSharedSession || (roomRacePhase === "lobby" && allPlayersInLobby));
+
   if (isActiveRace) {
     return (
       <section className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-2 rounded-2xl border border-cyan-300/20 bg-slate-950/70 px-3 py-2 backdrop-blur-xl">
         <span className="text-xs uppercase tracking-[0.16em] text-cyan-200/80">{roomId}</span>
         <button
           type="button"
-          onClick={onDisconnect}
+          onClick={onExitRace}
           className="rounded-lg border border-rose-300/45 bg-rose-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/25"
         >
-          Exit
+          {isSharedSession ? "Exit to Lobby" : "Exit"}
         </button>
       </section>
     );
   }
 
-  if (inLobbyFlow) {
+  if (inRoomLobbyFlow) {
     const countdownMs = Math.max(0, raceStartingAtMs - nowMs);
+    const waitingForRoomReset = isSharedSession && racePhase === "lobby" && roomRacePhase !== "lobby";
+    const statusCopy = racePhase === "starting"
+      ? `Transitioning to the start line. Race begins in ${formatCountdown(countdownMs)}s.`
+      : waitingForRoomReset
+        ? roomRacePhase === "finish"
+          ? "You are back in the shared room lobby. Waiting for the remaining drivers to return before the next race can start."
+          : "You are back in the shared room lobby. Wait here while the current race finishes, or leave the room."
+        : isSharedSession
+          ? "Drivers are staged in the shared room lobby. Start the race when everyone is back and ready."
+          : "Your solo car is staged and ready. Start whenever you want.";
+    const helperCopy = demoMode
+      ? "Demo mode still follows the same lobby -> starting -> race flow."
+      : isSharedSession
+        ? "Shared rooms can only restart once every driver in the room is back in the lobby."
+        : "Solo runs return to your personal lobby when you exit the room.";
+    const panelLabel = isSharedSession ? "Shared Room Lobby" : "Solo Staging";
 
     return (
       <section className="pointer-events-auto absolute left-4 top-4 z-20 w-[min(92vw,24rem)] rounded-3xl border border-cyan-300/28 bg-[linear-gradient(145deg,rgba(6,18,42,0.9),rgba(10,11,32,0.9))] p-5 shadow-[0_0_30px_rgba(40,246,255,0.12)] backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200/80">Waiting Lobby</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200/80">{panelLabel}</p>
             <h1 className="mt-1 text-xl font-semibold text-cyan-50">{roomId}</h1>
           </div>
           <span className={`rounded-full px-2 py-1 text-xs font-semibold uppercase ${badgeClass}`}>
@@ -153,11 +183,7 @@ export function LobbyPanel() {
           </span>
         </div>
 
-        <p className="mt-3 text-sm text-slate-300">
-          {racePhase === "starting"
-            ? `Transitioning to the start line. Race begins in ${formatCountdown(countdownMs)}s.`
-            : "Drivers are staged in the waiting bay. Start the race when everyone is ready."}
-        </p>
+        <p className="mt-3 text-sm text-slate-300">{statusCopy}</p>
 
         <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-slate-950/55 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/75">Drivers</p>
@@ -171,7 +197,7 @@ export function LobbyPanel() {
                 >
                   <span>{player.displayName}{isLocal ? " (you)" : ""}</span>
                   <span className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/75">
-                    Lane {player.laneIndex + 1}
+                    {player.racePhase} · Lane {player.laneIndex + 1}
                   </span>
                 </li>
               );
@@ -183,25 +209,21 @@ export function LobbyPanel() {
           <button
             type="button"
             onClick={onStartRace}
-            disabled={racePhase !== "lobby"}
+            disabled={!canStartRace}
             className="rounded-xl border border-cyan-300/60 bg-cyan-400/25 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {racePhase === "starting" ? "Starting..." : "Start Race"}
           </button>
           <button
             type="button"
-            onClick={onDisconnect}
+            onClick={onLeaveRoom}
             className="rounded-xl border border-rose-300/45 bg-rose-500/15 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/25"
           >
-            Exit
+            {isSharedSession ? "Leave Room" : "Exit"}
           </button>
         </div>
 
-        <p className="mt-3 text-xs text-slate-300/90">
-          {demoMode
-            ? "Demo mode uses AI rivals locally, but it still honors the same lobby -> starting -> race flow."
-            : "Shared rooms stay in the lobby until a driver starts the race. Solo rooms use the same flow for consistency."}
-        </p>
+        <p className="mt-3 text-xs text-slate-300/90">{helperCopy}</p>
       </section>
     );
   }

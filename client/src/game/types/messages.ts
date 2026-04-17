@@ -48,6 +48,7 @@ export interface PlayerSnapshot {
   speedMps: number;
   lap: number;
   finished: boolean;
+  racePhase: RacePhase;
 }
 
 export interface GameStateUpdateMessage {

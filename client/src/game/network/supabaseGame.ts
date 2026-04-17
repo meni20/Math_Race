@@ -154,6 +154,21 @@ export class SupabaseGameClient {
     }
   }
 
+  async returnToLobby() {
+    const sessionPayload = this.getSessionPayload();
+    if (!sessionPayload) {
+      return;
+    }
+
+    try {
+      const response = await this.invoke("return-to-lobby", sessionPayload);
+      this.applyResponse(response);
+    } catch (error) {
+      console.warn("[supabase] return-to-lobby failed", error);
+      useGameStore.getState().setConnection("error");
+    }
+  }
+
   private startSyncLoop() {
     this.stopSyncLoop();
     const generation = ++this.syncGeneration;
