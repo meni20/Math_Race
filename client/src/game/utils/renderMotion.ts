@@ -6,6 +6,12 @@ const BOOST_EXTRA_SPEED_MPS = 30;
 const WRONG_ANSWER_SPEED_PENALTY_MPS = 7.5;
 const HIGHWAY_TELEPORT_METERS = 240;
 const HIGHWAY_BOOST_MULTIPLIER = 1.35;
+const MAX_RENDER_FRAME_DELTA_SECONDS = 0.05;
+const POSITION_CATCH_UP_RATE = 10;
+const POSITION_CORRECTION_RATE = 16;
+const SPEED_CATCH_UP_RATE = 12;
+const SNAP_POSITION_DELTA_METERS = 160;
+const SNAP_SPEED_DELTA_MPS = 70;
 
 export interface PlayerSyncMeta {
   receivedAtMs: number;
@@ -47,6 +53,17 @@ function clampLap(value: number, totalLaps: number) {
     return 0;
   }
   return Math.max(0, Math.min(safeTotalLaps - 1, Math.trunc(value)));
+}
+
+function dampScalar(current: number, target: number, smoothing: number, deltaSeconds: number) {
+  if (!Number.isFinite(current)) {
+    return target;
+  }
+  if (!Number.isFinite(target) || deltaSeconds <= 0) {
+    return current;
+  }
+  const factor = 1 - Math.exp(-Math.max(0, smoothing) * deltaSeconds);
+  return current + ((target - current) * factor);
 }
 
 function parsePattern(prompt: string, pattern: RegExp, evaluator: (...values: number[]) => number, boostMultiplier: number) {
@@ -196,6 +213,130 @@ export function getRenderedPlayerSnapshot(
     positionMeters: clampMeters(predictedPositionMeters, safeTrackLengthMeters),
     speedMps: clampSpeed(predictedSpeedMps)
   };
+}
+
+interface AdvanceRenderedPlayersArgs {
+  previousPlayers: Record<string, PlayerSnapshot>;
+  authoritativePlayers: Record<string, PlayerSnapshot>;
+  playerIds: string[];
+  localPlayerId: string;
+  playerSyncMeta: Record<string, PlayerSyncMeta>;
+  localMotionPrediction: LocalMotionPrediction | null;
+  trackLengthMeters: number;
+  raceStopped: boolean;
+  nowMs: number;
+  lastFrameAtMs: number;
+}
+
+function shouldSnapRenderedPlayer(
+  previousPlayer: PlayerSnapshot,
+  targetPlayer: PlayerSnapshot
+) {
+  if (previousPlayer.racePhase !== targetPlayer.racePhase) {
+    return true;
+  }
+
+  if (previousPlayer.finished !== targetPlayer.finished) {
+    return true;
+  }
+
+  if (previousPlayer.lap !== targetPlayer.lap) {
+    return true;
+  }
+
+  if (Math.abs(targetPlayer.positionMeters - previousPlayer.positionMeters) >= SNAP_POSITION_DELTA_METERS) {
+    return true;
+  }
+
+  if (Math.abs(targetPlayer.speedMps - previousPlayer.speedMps) >= SNAP_SPEED_DELTA_MPS) {
+    return true;
+  }
+
+  return false;
+}
+
+function advanceRenderedPlayer(
+  previousPlayer: PlayerSnapshot | undefined,
+  targetPlayer: PlayerSnapshot,
+  deltaSeconds: number,
+  trackLengthMeters: number
+) {
+  if (!previousPlayer) {
+    return targetPlayer;
+  }
+
+  if (shouldSnapRenderedPlayer(previousPlayer, targetPlayer) || deltaSeconds <= 0) {
+    return targetPlayer;
+  }
+
+  const nextSpeedMps = clampSpeed(
+    dampScalar(previousPlayer.speedMps, targetPlayer.speedMps, SPEED_CATCH_UP_RATE, deltaSeconds)
+  );
+  const projectedPositionMeters = clampMeters(
+    previousPlayer.positionMeters + (nextSpeedMps * deltaSeconds),
+    trackLengthMeters
+  );
+  const correctionRate = targetPlayer.positionMeters >= projectedPositionMeters
+    ? POSITION_CATCH_UP_RATE
+    : POSITION_CORRECTION_RATE;
+  const nextPositionMeters = clampMeters(
+    dampScalar(projectedPositionMeters, targetPlayer.positionMeters, correctionRate, deltaSeconds),
+    trackLengthMeters
+  );
+
+  return {
+    ...targetPlayer,
+    positionMeters: nextPositionMeters,
+    speedMps: nextSpeedMps
+  };
+}
+
+export function advanceRenderedPlayers({
+  previousPlayers,
+  authoritativePlayers,
+  playerIds,
+  localPlayerId,
+  playerSyncMeta,
+  localMotionPrediction,
+  trackLengthMeters,
+  raceStopped,
+  nowMs,
+  lastFrameAtMs
+}: AdvanceRenderedPlayersArgs) {
+  const deltaSeconds = lastFrameAtMs > 0
+    ? Math.min(MAX_RENDER_FRAME_DELTA_SECONDS, Math.max(0, nowMs - lastFrameAtMs) / 1000)
+    : 0;
+  const nextPlayers: Record<string, PlayerSnapshot> = {};
+  const activePlayerIds = new Set(playerIds);
+
+  if (localPlayerId) {
+    activePlayerIds.add(localPlayerId);
+  }
+
+  for (const currentPlayerId of activePlayerIds) {
+    const authoritativePlayer = authoritativePlayers[currentPlayerId];
+    const targetPlayer = getRenderedPlayerSnapshot(
+      authoritativePlayer,
+      playerSyncMeta[currentPlayerId],
+      localMotionPrediction,
+      trackLengthMeters,
+      raceStopped || authoritativePlayer?.racePhase !== "active",
+      nowMs
+    );
+
+    if (!targetPlayer) {
+      continue;
+    }
+
+    nextPlayers[currentPlayerId] = advanceRenderedPlayer(
+      previousPlayers[currentPlayerId],
+      targetPlayer,
+      deltaSeconds,
+      trackLengthMeters
+    );
+  }
+
+  return nextPlayers;
 }
 
 export function getPlayerRaceDistanceMeters(

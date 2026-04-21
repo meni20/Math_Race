@@ -23,9 +23,15 @@
 1. Install dependencies:
    - `cd client`
    - `npm install`
-2. Optional env:
+2. Transport selection is config-driven:
+   - Supabase is used only when both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set.
+   - Websocket is used only when `VITE_BACKEND_URL` is explicitly set.
+   - Otherwise the client uses demo mode by default.
+3. Optional env:
    - `VITE_BACKEND_URL=http://localhost:8080`
-3. Start:
+   - `VITE_SUPABASE_URL=https://<project-ref>.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY=<your-anon-key>`
+4. Start:
    - `npm run dev`
 
 ## Render Env

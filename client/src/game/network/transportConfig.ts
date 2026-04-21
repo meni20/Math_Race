@@ -34,13 +34,6 @@ export function getGameBackendUrl() {
     return normalizeUrl(configuredUrl);
   }
 
-  if (typeof window !== "undefined") {
-    const hostname = window.location.hostname.toLowerCase();
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:8080";
-    }
-  }
-
   return null;
 }
 

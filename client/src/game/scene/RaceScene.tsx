@@ -1,4 +1,4 @@
-import { Sparkles, Text } from "@react-three/drei";
+import { Billboard, Sparkles, Text } from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Group, MathUtils, PerspectiveCamera, PointLight, Vector3 } from "three";
@@ -7,10 +7,9 @@ import { useGameStore } from "../store/useGameStore";
 import {
   getDistanceToFinishMeters,
   getPlayerProgressRatio,
-  getRenderedPlayerSnapshot,
   isPlayerOnFinalLap
 } from "../utils/renderMotion";
-import { useAnimatedNow } from "../utils/useRenderedPlayers";
+import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRenderedPlayers";
 
 const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
@@ -217,7 +216,14 @@ function NeonCarModel({ color }: { color: string }) {
 function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; slotIndex: number; totalPlayers: number }) {
   const groupRef = useRef<Group>(null);
   const glowRef = useRef<PointLight>(null);
+  const localPlayerId = useGameStore((state) => state.playerId);
+  const displayName = useGameStore((state) => state.players[playerId]?.displayName ?? "Driver");
   const color = useMemo(() => hashColor(playerId), [playerId]);
+  const labelText = playerId === localPlayerId ? "You" : displayName;
+  const labelPanelWidth = useMemo(
+    () => Math.max(1.15, Math.min(3, (labelText.length * 0.18) + 0.45)),
+    [labelText]
+  );
 
   useFrame((_, delta) => {
     const state = useGameStore.getState();
@@ -226,17 +232,10 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
       return;
     }
 
+    const renderedState = getRenderedPlayersSnapshot();
+    const renderedPlayer = renderedState.players[playerId];
     const nowMs = Date.now();
-    const playerRacePhase = player.racePhase ?? state.racePhase;
-    const motionPaused = state.raceStopped || playerRacePhase !== "active";
-    const renderedPlayer = getRenderedPlayerSnapshot(
-      player,
-      state.playerSyncMeta[playerId],
-      state.localMotionPrediction,
-      state.trackLengthMeters,
-      motionPaused,
-      nowMs
-    );
+    const playerRacePhase = renderedPlayer?.racePhase ?? player.racePhase ?? state.racePhase;
 
     let targetX = 0;
     let targetY = 0.7;
@@ -291,6 +290,25 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
   return (
     <group ref={groupRef}>
       <NeonCarModel color={color} />
+      <Billboard position={[0, 2.05, 0]} follow>
+        <group renderOrder={12}>
+          <mesh position={[0, 0, -0.02]}>
+            <planeGeometry args={[labelPanelWidth, 0.38]} />
+            <meshBasicMaterial color="#04101f" transparent opacity={0.68} depthWrite={false} />
+          </mesh>
+          <Text
+            fontSize={0.2}
+            color="#f8fbff"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.03}
+            outlineColor="#02101c"
+            maxWidth={2.6}
+          >
+            {labelText}
+          </Text>
+        </group>
+      </Billboard>
       <pointLight ref={glowRef} color={color} intensity={5.4} distance={15} position={[0, 0.95, 0]} />
     </group>
   );
@@ -431,12 +449,7 @@ function SideProgressMarkers() {
   const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
-  const playerId = useGameStore((state) => state.playerId);
-  const players = useGameStore((state) => state.players);
-  const playerSyncMeta = useGameStore((state) => state.playerSyncMeta);
-  const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
-  const raceStopped = useGameStore((state) => state.raceStopped);
-  const nowMs = useAnimatedNow(Boolean(playerId));
+  const { localPlayer } = useRenderedPlayers();
   const markers = useMemo(
     () =>
       Array.from({ length: 10 }, (_, index) => {
@@ -457,14 +470,6 @@ function SideProgressMarkers() {
     return null;
   }
 
-  const localPlayer = getRenderedPlayerSnapshot(
-    players[playerId],
-    playerSyncMeta[playerId],
-    localMotionPrediction,
-    trackLengthMeters,
-    raceStopped || racePhase !== "active",
-    nowMs
-  );
   const overallProgressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
 
   return (
@@ -537,24 +542,11 @@ function FinishGate() {
   const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
-  const playerId = useGameStore((state) => state.playerId);
-  const players = useGameStore((state) => state.players);
-  const playerSyncMeta = useGameStore((state) => state.playerSyncMeta);
-  const localMotionPrediction = useGameStore((state) => state.localMotionPrediction);
-  const raceStopped = useGameStore((state) => state.raceStopped);
-  const nowMs = useAnimatedNow(Boolean(playerId));
+  const { localPlayer } = useRenderedPlayers();
   const glowRef = useRef<PointLight>(null);
   const gateVisible = racePhase === "active" || racePhase === "finish";
   const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
 
-  const localPlayer = getRenderedPlayerSnapshot(
-    players[playerId],
-    playerSyncMeta[playerId],
-    localMotionPrediction,
-    trackLengthMeters,
-    raceStopped || racePhase !== "active",
-    nowMs
-  );
   const progressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
   const distanceToFinishMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
   const gateApproachFactor = MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
@@ -704,14 +696,7 @@ function CameraRig() {
       return;
     }
 
-    const renderedLocalPlayer = getRenderedPlayerSnapshot(
-      localPlayer,
-      game.playerSyncMeta[game.playerId],
-      game.localMotionPrediction,
-      game.trackLengthMeters,
-      game.raceStopped || game.racePhase !== "active",
-      nowMs
-    );
+    const renderedLocalPlayer = getRenderedPlayersSnapshot().localPlayer;
     if (!renderedLocalPlayer) {
       return;
     }
