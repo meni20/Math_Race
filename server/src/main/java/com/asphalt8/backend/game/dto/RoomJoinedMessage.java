@@ -6,6 +6,8 @@ public record RoomJoinedMessage(
     String displayName,
     double trackLengthMeters,
     int totalLaps,
-    double baseSpeedMps
+    double baseSpeedMps,
+    String roomCreatorPlayerId,
+    RoomSettings roomSettings
 ) {
 }

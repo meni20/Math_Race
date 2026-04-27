@@ -5,6 +5,7 @@ import { Hud } from "./components/Hud";
 import { LobbyPanel } from "./components/LobbyPanel";
 import { QuestionOverlay } from "./components/QuestionOverlay";
 import { gameSocket } from "./game/network/gameSocket";
+import { getConfiguredGameTransport } from "./game/network/transportConfig";
 import { RaceScene } from "./game/scene/RaceScene";
 import { useGameStore } from "./game/store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "./game/utils/gameIds";
@@ -61,6 +62,18 @@ function App() {
 
     const params = new URLSearchParams(window.location.search);
     if (!parseBoolean(params.get("autojoin"))) {
+      if (getConfiguredGameTransport() !== "websocket") {
+        return;
+      }
+
+      const persistedSession = gameSocket.getPersistedWebsocketSession();
+      if (!persistedSession) {
+        return;
+      }
+
+      autoJoinAttemptedRef.current = true;
+      prepareJoin(persistedSession.roomId, persistedSession.displayName, persistedSession.playerId);
+      gameSocket.connect(persistedSession);
       return;
     }
 

@@ -26,7 +26,7 @@ Deno.serve(async (request) => {
       admin,
       normalizedPayload.roomId,
       now,
-      (room) => syncRoom(room, normalizedPayload, now)
+      (room, presenceByPlayerId) => syncRoom(room, normalizedPayload, presenceByPlayerId, now)
     );
     return jsonResponse(result.response);
   } catch (error) {

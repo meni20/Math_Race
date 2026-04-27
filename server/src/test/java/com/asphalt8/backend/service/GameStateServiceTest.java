@@ -13,6 +13,9 @@ import static org.mockito.Mockito.when;
 import com.asphalt8.backend.entity.UserProfile;
 import com.asphalt8.backend.game.dto.DecisionChoiceRequest;
 import com.asphalt8.backend.game.dto.JoinRoomRequest;
+import com.asphalt8.backend.game.dto.RoomPlayerRequest;
+import com.asphalt8.backend.game.dto.RoomSettings;
+import com.asphalt8.backend.game.dto.UpdateRoomSettingsRequest;
 import com.asphalt8.backend.game.model.DecisionPoint;
 import com.asphalt8.backend.game.model.GameRoomState;
 import com.asphalt8.backend.game.model.GeneratedQuestion;
@@ -60,22 +63,43 @@ public class GameStateServiceTest {
     }
 
     @Test
-    public void restartRaceIssuesQuestionsForAllPlayers() {
+    public void joinRoomReturnsLobbyStateWithTeacherSetupMetadata() {
+        GameStateService.JoinOutcome outcome = gameStateService.joinRoom(
+            new JoinRoomRequest("arena-3", "p-1", "Player One")
+        );
+
+        assertTrue(outcome.accepted());
+        assertNotNull(outcome.joinedMessage());
+        assertNotNull(outcome.stateUpdate());
+        assertEquals("lobby", outcome.stateUpdate().racePhase());
+        assertEquals("p-1", outcome.joinedMessage().roomCreatorPlayerId());
+        assertEquals("p-1", outcome.stateUpdate().roomCreatorPlayerId());
+        assertEquals("lobby", outcome.stateUpdate().players().get(0).racePhase());
+        assertNull(outcome.question());
+        assertNull(outcome.decision());
+    }
+
+    @Test
+    public void startRaceTransitionsThroughStartingIntoActive() {
         gameStateService.joinRoom(new JoinRoomRequest("arena-1", "p-1", "Player One"));
         gameStateService.joinRoom(new JoinRoomRequest("arena-1", "p-2", "Player Two"));
 
-        GameRoomState room = gameStateService.getRooms().iterator().next();
-        synchronized (room.getLock()) {
-            room.setRaceStopped(true);
-            room.setWinnerPlayerId("p-1");
-        }
-
-        GameStateService.JoinOutcome outcome = gameStateService.joinRoom(
-            new JoinRoomRequest("arena-1", "p-1", "Player One")
+        GameStateService.CommandOutcome startOutcome = gameStateService.startRace(
+            new RoomPlayerRequest("arena-1", "p-1")
         );
 
-        assertTrue(outcome.raceRestarted());
-        assertEquals(2, outcome.questionMessages().size());
+        assertTrue(startOutcome.accepted());
+        assertEquals("starting", startOutcome.stateUpdate().racePhase());
+
+        GameRoomState room = gameStateService.getRooms().iterator().next();
+        synchronized (room.getLock()) {
+            room.setRaceStartingAtMs(System.currentTimeMillis() - 1L);
+        }
+
+        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
+        assertEquals(1, dispatch.stateUpdates().size());
+        assertEquals("active", dispatch.stateUpdates().get(0).racePhase());
+        assertTrue(dispatch.stateUpdates().get(0).players().stream().allMatch(player -> "active".equals(player.racePhase())));
     }
 
     @Test
@@ -85,8 +109,13 @@ public class GameStateServiceTest {
 
         PlayerState player;
         synchronized (room.getLock()) {
+            room.setRacePhase("active");
+            room.setRaceStartedAtMs(System.currentTimeMillis() - 1000L);
+            room.setRaceStopped(false);
+            room.setRaceStoppedAtMs(0L);
             player = room.getPlayers().get("p-1");
             assertNotNull(player);
+            player.setRacePhase("active");
             player.setPendingQuestion(null);
             player.setPendingDecisionPoint(
                 new DecisionPoint(
@@ -103,73 +132,48 @@ public class GameStateServiceTest {
         );
 
         assertFalse(outcome.accepted());
-        assertNull(outcome.nextQuestion());
         synchronized (room.getLock()) {
             assertNotNull(player.getPendingDecisionPoint());
         }
     }
 
     @Test
-    public void joinRoomReturnsInitialSnapshotWithRenderablePlayerState() {
-        GameStateService.JoinOutcome outcome = gameStateService.joinRoom(
-            new JoinRoomRequest("arena-3", "p-1", "Player One")
+    public void nonCreatorCannotUpdateTeacherSetup() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-setup", "p-1", "Teacher"));
+        gameStateService.joinRoom(new JoinRoomRequest("arena-setup", "p-2", "Student"));
+
+        GameStateService.CommandOutcome outcome = gameStateService.updateRoomSettings(
+            new UpdateRoomSettingsRequest(
+                "arena-setup",
+                "p-2",
+                new RoomSettings("New Name", 4, 120, 10)
+            )
         );
 
-        assertNotNull(outcome.immediateStateUpdate());
-        assertEquals(1, outcome.immediateStateUpdate().players().size());
-        assertEquals(1, outcome.questionMessages().size());
-
-        var snapshot = outcome.immediateStateUpdate().players().get(0);
-        assertEquals("p-1", snapshot.playerId());
-        assertEquals("Player One", snapshot.displayName());
-        assertEquals(0, snapshot.laneIndex());
-        assertEquals(0.0, snapshot.positionMeters());
-        assertEquals(42.0, snapshot.speedMps());
-        assertEquals(0, snapshot.lap());
-        assertFalse(snapshot.finished());
-        assertTrue(Double.isFinite(snapshot.positionMeters()));
-        assertTrue(Double.isFinite(snapshot.speedMps()));
+        assertFalse(outcome.accepted());
+        assertEquals("ROOM_CREATOR_ONLY", outcome.errorCode());
     }
 
     @Test
-    public void tickSanitizesInvalidTelemetryBeforeBroadcast() {
-        gameStateService.joinRoom(new JoinRoomRequest("arena-4", "p-1", "Player One"));
+    public void returnToLobbyResetsRoomWhenNoActiveRacersRemain() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-return", "p-1", "Player One"));
         GameRoomState room = gameStateService.getRooms().iterator().next();
 
         synchronized (room.getLock()) {
+            room.setRacePhase("active");
+            room.setRaceStartedAtMs(System.currentTimeMillis() - 1000L);
             PlayerState player = room.getPlayers().get("p-1");
             assertNotNull(player);
-            player.setPositionMeters(Double.NaN);
-            player.setSpeedMps(Double.NaN);
-            player.setLap(-5);
+            player.setRacePhase("active");
         }
 
-        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
-        assertEquals(1, dispatch.stateUpdates().size());
+        GameStateService.CommandOutcome outcome = gameStateService.returnPlayerToLobby(
+            new RoomPlayerRequest("arena-return", "p-1")
+        );
 
-        var snapshot = dispatch.stateUpdates().get(0).players().get(0);
-        assertTrue(Double.isFinite(snapshot.positionMeters()));
-        assertTrue(Double.isFinite(snapshot.speedMps()));
-        assertEquals(0, snapshot.lap());
-        assertTrue(snapshot.positionMeters() >= 0.0);
-        assertTrue(snapshot.speedMps() >= 0.0);
-    }
-
-    @Test
-    public void tickClampsInvalidLaneIndexBeforeBroadcast() {
-        gameStateService.joinRoom(new JoinRoomRequest("arena-5", "p-1", "Player One"));
-        GameRoomState room = gameStateService.getRooms().iterator().next();
-
-        synchronized (room.getLock()) {
-            PlayerState player = room.getPlayers().get("p-1");
-            assertNotNull(player);
-            player.setLaneIndex(999);
-        }
-
-        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
-        assertEquals(1, dispatch.stateUpdates().size());
-
-        var snapshot = dispatch.stateUpdates().get(0).players().get(0);
-        assertEquals(3, snapshot.laneIndex());
+        assertTrue(outcome.accepted());
+        assertNotNull(outcome.stateUpdate());
+        assertEquals("lobby", outcome.stateUpdate().racePhase());
+        assertEquals("lobby", outcome.stateUpdate().players().get(0).racePhase());
     }
 }

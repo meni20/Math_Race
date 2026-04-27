@@ -33,3 +33,6 @@ client/codex_vehicle_debug*.png
 # Logs
 *.log
 .vercel
+
+server/.gradle-home/
+

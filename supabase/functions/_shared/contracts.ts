@@ -197,6 +197,33 @@ export interface GameRoomRow {
   updated_at: string;
 }
 
+export interface GameRoomPresenceRow {
+  room_id: string;
+  player_id: string;
+  session_id: string;
+  last_seen_at: string;
+  updated_at: string;
+}
+
+export interface GameRoomPresenceRecord {
+  roomId: string;
+  playerId: string;
+  sessionId: string;
+  lastSeenAtMs: number;
+}
+
+export interface GameRoomPresenceUpsert {
+  roomId: string;
+  playerId: string;
+  sessionId: string;
+  lastSeenAtMs: number;
+}
+
+export interface GameRoomPresenceDelete {
+  roomId: string;
+  playerId: string;
+}
+
 export interface UserProfileUpsert {
   id: string;
   display_name: string;
@@ -218,4 +245,6 @@ export interface RoomMutationResult {
   room: GameRoomStateRecord | null;
   response: GameFunctionResponse;
   profile?: UserProfileUpsert;
+  presenceUpserts?: GameRoomPresenceUpsert[];
+  presenceDeletes?: GameRoomPresenceDelete[];
 }

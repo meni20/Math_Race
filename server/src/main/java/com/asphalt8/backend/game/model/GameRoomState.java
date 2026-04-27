@@ -1,5 +1,6 @@
 package com.asphalt8.backend.game.model;
 
+import com.asphalt8.backend.game.dto.RoomSettings;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GameRoomState {
@@ -13,11 +14,15 @@ public class GameRoomState {
     private long tick;
     private boolean resultPersisted;
     private long persistRetryAtMs;
+    private String racePhase;
+    private long raceStartingAtMs;
     private boolean raceStopped;
     private long raceStartedAtMs;
     private long raceStoppedAtMs;
     private long lastInteractionAtMs;
     private String winnerPlayerId;
+    private String roomCreatorPlayerId;
+    private RoomSettings roomSettings;
 
     public GameRoomState(String roomId, double trackLengthMeters, int totalLaps) {
         this.roomId = roomId;
@@ -29,11 +34,15 @@ public class GameRoomState {
         this.tick = 0L;
         this.resultPersisted = false;
         this.persistRetryAtMs = 0L;
+        this.racePhase = "lobby";
+        this.raceStartingAtMs = 0L;
         this.raceStopped = false;
-        this.raceStartedAtMs = this.createdAtMs;
+        this.raceStartedAtMs = 0L;
         this.raceStoppedAtMs = 0L;
         this.lastInteractionAtMs = this.createdAtMs;
         this.winnerPlayerId = null;
+        this.roomCreatorPlayerId = null;
+        this.roomSettings = null;
     }
 
     public String getRoomId() {
@@ -84,6 +93,22 @@ public class GameRoomState {
         this.persistRetryAtMs = persistRetryAtMs;
     }
 
+    public String getRacePhase() {
+        return racePhase;
+    }
+
+    public void setRacePhase(String racePhase) {
+        this.racePhase = racePhase;
+    }
+
+    public long getRaceStartingAtMs() {
+        return raceStartingAtMs;
+    }
+
+    public void setRaceStartingAtMs(long raceStartingAtMs) {
+        this.raceStartingAtMs = raceStartingAtMs;
+    }
+
     public boolean isRaceStopped() {
         return raceStopped;
     }
@@ -122,5 +147,21 @@ public class GameRoomState {
 
     public void setWinnerPlayerId(String winnerPlayerId) {
         this.winnerPlayerId = winnerPlayerId;
+    }
+
+    public String getRoomCreatorPlayerId() {
+        return roomCreatorPlayerId;
+    }
+
+    public void setRoomCreatorPlayerId(String roomCreatorPlayerId) {
+        this.roomCreatorPlayerId = roomCreatorPlayerId;
+    }
+
+    public RoomSettings getRoomSettings() {
+        return roomSettings;
+    }
+
+    public void setRoomSettings(RoomSettings roomSettings) {
+        this.roomSettings = roomSettings;
     }
 }
