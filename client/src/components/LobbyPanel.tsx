@@ -3,6 +3,11 @@ import { gameSocket } from "../game/network/gameSocket";
 import { isDemoTransportConfigured } from "../game/network/transportConfig";
 import { useGameStore } from "../game/store/useGameStore";
 import { normalizeRoomId } from "../game/utils/gameIds";
+import {
+  areRoomSettingsEqual,
+  formatDurationLabel,
+  normalizeRoomSettings
+} from "../game/utils/roomSettings";
 
 function buildPlayerId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -31,10 +36,13 @@ export function LobbyPanel() {
   const roomRacePhase = useGameStore((state) => state.roomRacePhase);
   const racePhase = useGameStore((state) => state.racePhase);
   const raceStartingAtMs = useGameStore((state) => state.raceStartingAtMs);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
+  const roomSettings = useGameStore((state) => state.roomSettings);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
 
   const [roomInput, setRoomInput] = useState(roomId || "arena-1");
   const [nameInput, setNameInput] = useState(displayName || "Neon Racer");
+  const [roomSettingsDraft, setRoomSettingsDraft] = useState(roomSettings);
   const [nowMs, setNowMs] = useState(Date.now());
   const connecting = connection === "connecting";
   const connected = connection === "connected";
@@ -50,6 +58,16 @@ export function LobbyPanel() {
   useEffect(() => {
     setNameInput(displayName || "Neon Racer");
   }, [displayName]);
+
+  useEffect(() => {
+    setRoomSettingsDraft(roomSettings);
+  }, [
+    roomId,
+    roomSettings.raceName,
+    roomSettings.maxPlayers,
+    roomSettings.raceDurationSeconds,
+    roomSettings.questionTimeLimitSeconds
+  ]);
 
   useEffect(() => {
     if (racePhase !== "starting") {
@@ -79,6 +97,24 @@ export function LobbyPanel() {
       .map((currentPlayerId) => players[currentPlayerId])
       .filter((player): player is NonNullable<typeof player> => Boolean(player));
   }, [playerIds, players]);
+  const creatorDisplayName = useMemo(() => {
+    if (roomCreatorPlayerId === playerId) {
+      return "You";
+    }
+    return roster.find((player) => player.playerId === roomCreatorPlayerId)?.displayName ?? "Waiting";
+  }, [playerId, roomCreatorPlayerId, roster]);
+
+  const minimumMaxPlayers = isSharedSession && demoMode
+    ? 2
+    : Math.max(2, Math.min(4, roster.length || 2));
+  const normalizedRoomSettingsDraft = useMemo(
+    () => normalizeRoomSettings(roomId, roomSettingsDraft, minimumMaxPlayers),
+    [minimumMaxPlayers, roomId, roomSettingsDraft]
+  );
+  const isRoomCreator = isSharedSession && playerId === roomCreatorPlayerId;
+  const canEditRoomSettings = isRoomCreator && racePhase === "lobby" && roomRacePhase === "lobby";
+  const showRoomSettingsEditor = canEditRoomSettings;
+  const roomSettingsDirty = !areRoomSettingsEqual(normalizedRoomSettingsDraft, roomSettings);
 
   const onJoin = (event: FormEvent) => {
     event.preventDefault();
@@ -134,6 +170,13 @@ export function LobbyPanel() {
     gameSocket.startRace();
   };
 
+  const onSaveRoomSettings = () => {
+    if (!canEditRoomSettings) {
+      return;
+    }
+    gameSocket.updateRoomSettings(normalizedRoomSettingsDraft);
+  };
+
   const allPlayersInLobby = roster.length > 0 && roster.every((player) => player.racePhase === "lobby");
   const canStartRace = racePhase === "lobby" && (!isSharedSession || (roomRacePhase === "lobby" && allPlayersInLobby));
 
@@ -185,19 +228,128 @@ export function LobbyPanel() {
 
         <p className="mt-3 text-sm text-slate-300">{statusCopy}</p>
 
+        {isSharedSession ? (
+          <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-slate-950/55 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/75">Teacher Race Setup</p>
+                <p className="mt-1 text-sm font-medium text-cyan-50">{roomSettings.raceName}</p>
+              </div>
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-cyan-100">
+                {isRoomCreator ? (showRoomSettingsEditor ? "Room Creator" : "Locked") : "Student View"}
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Max Players</p>
+                <p className="mt-1 font-medium">{roomSettings.maxPlayers}</p>
+              </div>
+              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Race Duration</p>
+                <p className="mt-1 font-medium">{formatDurationLabel(roomSettings.raceDurationSeconds)}</p>
+              </div>
+              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Question Time</p>
+                <p className="mt-1 font-medium">{roomSettings.questionTimeLimitSeconds}s</p>
+              </div>
+              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Creator</p>
+                <p className="mt-1 font-medium">{creatorDisplayName}</p>
+              </div>
+            </div>
+
+            {showRoomSettingsEditor ? (
+              <>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Race Name</span>
+                    <input
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      value={roomSettingsDraft.raceName}
+                      onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceName: event.target.value }))}
+                      placeholder="Classroom Race"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Max Players</span>
+                    <select
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      value={normalizedRoomSettingsDraft.maxPlayers}
+                      onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, maxPlayers: Number(event.target.value) }))}
+                    >
+                      {Array.from({ length: 5 - minimumMaxPlayers }, (_, index) => minimumMaxPlayers + index).map((value) => (
+                        <option key={`max-${value}`} value={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Race Duration</span>
+                    <select
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      value={normalizedRoomSettingsDraft.raceDurationSeconds}
+                      onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceDurationSeconds: Number(event.target.value) }))}
+                    >
+                      {[60, 120, 180, 300].map((value) => (
+                        <option key={`duration-${value}`} value={value}>{formatDurationLabel(value)}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Question Time</span>
+                    <select
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      value={normalizedRoomSettingsDraft.questionTimeLimitSeconds}
+                      onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, questionTimeLimitSeconds: Number(event.target.value) }))}
+                    >
+                      {[5, 8, 10, 12, 15].map((value) => (
+                        <option key={`question-time-${value}`} value={value}>{value}s</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <p className="text-xs text-slate-300/90">Set up the room before the race starts.</p>
+                  <button
+                    type="button"
+                    onClick={onSaveRoomSettings}
+                    disabled={!roomSettingsDirty}
+                    className="rounded-xl border border-cyan-300/60 bg-cyan-400/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Save Setup
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="mt-4 text-xs text-slate-300/90">
+                {roomRacePhase !== "lobby" || racePhase !== "lobby"
+                  ? "Race setup is locked once the room leaves the lobby."
+                  : isRoomCreator
+                  ? "Race setup is locked once the room leaves the lobby."
+                  : "The teacher manages race setup before the race starts."}
+              </p>
+            )}
+          </div>
+        ) : null}
+
         <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-slate-950/55 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/75">Drivers</p>
           <ul className="mt-3 space-y-2 text-sm">
             {roster.map((player) => {
               const isLocal = player.playerId === playerId;
+              const isCreator = player.playerId === roomCreatorPlayerId;
               return (
                 <li
                   key={player.playerId}
                   className="flex items-center justify-between rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2 text-slate-100"
                 >
-                  <span>{player.displayName}{isLocal ? " (you)" : ""}</span>
+                  <span>{player.displayName}{isLocal ? " (you)" : ""}{isCreator ? " · creator" : ""}</span>
                   <span className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/75">
-                    {player.racePhase} · Lane {player.laneIndex + 1}
+                    {player.racePhase} | Lane {player.laneIndex + 1}
                   </span>
                 </li>
               );

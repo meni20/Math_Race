@@ -8,8 +8,10 @@ import type {
   PlayerSnapshot,
   QuestionMessage,
   RacePhase,
+  RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
+import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 
 interface DemoPlayerState extends PlayerSnapshot {
   baseSpeedMps: number;
@@ -37,6 +39,8 @@ interface PendingDecision {
 interface DemoSession {
   roomId: string;
   localPlayerId: string;
+  roomCreatorPlayerId: string;
+  roomSettings: RoomSettings;
   trackLengthMeters: number;
   totalLaps: number;
   racePhase: RacePhase;
@@ -72,12 +76,10 @@ function clampSpeed(speedMps: number) {
   return Math.max(14, speedMps);
 }
 
-function createAiPlayers(roomId: string, localPlayerId: string) {
-  const names = roomId.startsWith("solo-")
-    ? ["Byte Rider", "Circuit Fox"]
-    : ["Byte Rider", "Circuit Fox", "Vector Nova"];
+function createAiPlayers(localPlayerId: string, count: number) {
+  const names = ["Byte Rider", "Circuit Fox", "Vector Nova"];
 
-  return names.map<DemoPlayerState>((displayName, index) => ({
+  return names.slice(0, count).map<DemoPlayerState>((displayName, index) => ({
     playerId: `${localPlayerId}-ai-${index + 1}`,
     displayName,
     laneIndex: Math.min(3, index + 1),
@@ -95,17 +97,24 @@ function createAiPlayers(roomId: string, localPlayerId: string) {
 }
 
 function buildJoinMessage(payload: ConnectPayload): RoomJoinedMessage {
+  const roomSettings = buildDefaultRoomSettings(payload.roomId);
   return {
     roomId: payload.roomId,
     targetPlayerId: payload.playerId,
     displayName: payload.displayName,
     trackLengthMeters: DEMO_TRACK_LENGTH_METERS,
     totalLaps: DEMO_TOTAL_LAPS,
-    baseSpeedMps: 28
+    baseSpeedMps: 28,
+    roomCreatorPlayerId: payload.playerId,
+    roomSettings
   };
 }
 
-function buildArithmeticQuestion(highwayChallenge: boolean): Omit<QuestionMessage, "roomId" | "targetPlayerId" | "questionId" | "expiresAtMs"> & { answer: number } {
+function buildArithmeticQuestion(
+  highwayChallenge: boolean,
+  questionTimeLimitSeconds: number
+): Omit<QuestionMessage, "roomId" | "targetPlayerId" | "questionId" | "expiresAtMs"> & { answer: number } {
+  const timeLimitMs = Math.max(5000, Math.trunc(questionTimeLimitSeconds * 1000));
   if (highwayChallenge) {
     const left = 5 + Math.floor(Math.random() * 6);
     const right = 6 + Math.floor(Math.random() * 5);
@@ -114,7 +123,7 @@ function buildArithmeticQuestion(highwayChallenge: boolean): Omit<QuestionMessag
       prompt: `${left} x ${right} + ${offset}`,
       answer: (left * right) + offset,
       difficulty: 3,
-      timeLimitMs: 9000,
+      timeLimitMs,
       highwayChallenge: true
     };
   }
@@ -127,7 +136,7 @@ function buildArithmeticQuestion(highwayChallenge: boolean): Omit<QuestionMessag
       prompt: `${left} + ${right}`,
       answer: left + right,
       difficulty: 1,
-      timeLimitMs: 7000,
+      timeLimitMs,
       highwayChallenge: false
     };
   }
@@ -138,7 +147,7 @@ function buildArithmeticQuestion(highwayChallenge: boolean): Omit<QuestionMessag
     prompt: `${left} x ${right}`,
     answer: left * right,
     difficulty: 2,
-    timeLimitMs: 7500,
+    timeLimitMs,
     highwayChallenge: false
   };
 }
@@ -154,6 +163,8 @@ function buildStateMessage(session: DemoSession): GameStateUpdateMessage {
     raceStopped: session.raceStopped,
     raceStoppedAtMs: session.raceStoppedAtMs,
     winnerPlayerId: session.winnerPlayerId,
+    roomCreatorPlayerId: session.roomCreatorPlayerId,
+    roomSettings: session.roomSettings,
     players: session.players.map<PlayerSnapshot>((player) => ({
       playerId: player.playerId,
       displayName: player.displayName,
@@ -178,6 +189,18 @@ function buildFeedback(roomId: string, targetPlayerId: string, accepted: boolean
 
 function getLocalPlayer(session: DemoSession) {
   return session.players.find((player) => player.playerId === session.localPlayerId) ?? null;
+}
+
+function syncDemoLobbyRoster(session: DemoSession) {
+  const localPlayer = getLocalPlayer(session);
+  if (!localPlayer) {
+    return;
+  }
+
+  const desiredAiCount = session.roomId.startsWith("solo-")
+    ? 2
+    : Math.max(0, session.roomSettings.maxPlayers - 1);
+  session.players = [localPlayer, ...createAiPlayers(session.localPlayerId, desiredAiCount)];
 }
 
 export class DemoRaceClient {
@@ -217,6 +240,8 @@ export class DemoRaceClient {
       this.session = {
         roomId: payload.roomId,
         localPlayerId: payload.playerId,
+        roomCreatorPlayerId: payload.playerId,
+        roomSettings: normalizeRoomSettings(payload.roomId, buildDefaultRoomSettings(payload.roomId)),
         trackLengthMeters: DEMO_TRACK_LENGTH_METERS,
         totalLaps: DEMO_TOTAL_LAPS,
         racePhase: "lobby",
@@ -226,12 +251,13 @@ export class DemoRaceClient {
         raceStoppedAtMs: 0,
         winnerPlayerId: null,
         tick: 0,
-        players: [localPlayer, ...createAiPlayers(payload.roomId, payload.playerId)],
+        players: [localPlayer],
         nextEventAtMs: now,
         eventCount: 0,
         pendingQuestion: null,
         pendingDecision: null
       };
+      syncDemoLobbyRoster(this.session);
 
       this.lastTickAtMs = now;
       useGameStore.getState().applyJoin(buildJoinMessage(payload));
@@ -347,6 +373,25 @@ export class DemoRaceClient {
     useGameStore.getState().applyStateUpdate(buildStateMessage(session));
   }
 
+  updateRoomSettings(nextSettings: RoomSettings) {
+    const session = this.session;
+    if (!session || session.roomId.startsWith("solo-")) {
+      return;
+    }
+
+    if (session.racePhase !== "lobby" || session.roomCreatorPlayerId !== session.localPlayerId) {
+      return;
+    }
+
+    session.roomSettings = normalizeRoomSettings(
+      session.roomId,
+      nextSettings,
+      2
+    );
+    syncDemoLobbyRoster(session);
+    useGameStore.getState().applyStateUpdate(buildStateMessage(session));
+  }
+
   returnToLobby() {
     const session = this.session;
     if (!session) {
@@ -453,20 +498,7 @@ export class DemoRaceClient {
     }
 
     if (raceWinner) {
-      session.racePhase = "finish";
-      session.raceStartingAtMs = 0;
-      session.raceStopped = true;
-      session.raceStoppedAtMs = now;
-      session.winnerPlayerId = raceWinner.playerId;
-      session.pendingQuestion = null;
-      session.pendingDecision = null;
-      for (const player of session.players) {
-        if (player.racePhase === "active" || player.racePhase === "starting") {
-          player.racePhase = "finish";
-        }
-      }
-      useGameStore.getState().clearQuestion();
-      useGameStore.getState().clearDecision();
+      this.finishRace(session, raceWinner, now);
     }
   }
 
@@ -512,7 +544,7 @@ export class DemoRaceClient {
       return;
     }
 
-    const base = buildArithmeticQuestion(highwayChallenge);
+    const base = buildArithmeticQuestion(highwayChallenge, session.roomSettings.questionTimeLimitSeconds);
     const questionId = buildQuestionId();
     const expiresAtMs = now + base.timeLimitMs;
     const message: QuestionMessage = {
@@ -601,6 +633,26 @@ export class DemoRaceClient {
       player.racePhase = "active";
     }
     this.lastTickAtMs = startAtMs;
+    useGameStore.getState().clearQuestion();
+    useGameStore.getState().clearDecision();
+  }
+
+  private finishRace(session: DemoSession, winner: DemoPlayerState, finishedAtMs: number) {
+    session.racePhase = "finish";
+    session.raceStartingAtMs = 0;
+    session.raceStopped = true;
+    session.raceStoppedAtMs = finishedAtMs;
+    session.winnerPlayerId = winner.playerId;
+    session.pendingQuestion = null;
+    session.pendingDecision = null;
+    for (const player of session.players) {
+      if (player.racePhase === "active" || player.racePhase === "starting") {
+        player.racePhase = "finish";
+      }
+      if (player.playerId !== winner.playerId) {
+        player.speedMps = 0;
+      }
+    }
     useGameStore.getState().clearQuestion();
     useGameStore.getState().clearDecision();
   }

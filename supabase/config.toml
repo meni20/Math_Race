@@ -422,3 +422,6 @@ verify_jwt = false
 
 [functions.return-to-lobby]
 verify_jwt = false
+
+[functions.update-room-settings]
+verify_jwt = false

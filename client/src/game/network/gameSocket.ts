@@ -11,6 +11,7 @@ import type {
   GameStateUpdateMessage,
   JoinRoomRequest,
   QuestionMessage,
+  RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
 import { DemoRaceClient } from "./demoRace";
@@ -127,6 +128,19 @@ class GameSocketClient {
         playerId: state.playerId
       })
     });
+  }
+
+  updateRoomSettings(roomSettings: RoomSettings) {
+    const transport = getConfiguredGameTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.updateRoomSettings(roomSettings);
+      return;
+    }
+
+    if (transport === "demo") {
+      this.demoClient.updateRoomSettings(roomSettings);
+      return;
+    }
   }
 
   returnToLobby() {

@@ -6,6 +6,7 @@ import type {
   PlayerSnapshot,
   QuestionMessage,
   RacePhase,
+  RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
 import {
@@ -15,6 +16,7 @@ import {
   type PlayerSyncMeta
 } from "../utils/renderMotion";
 import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
+import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 type SessionMode = "personal" | "shared" | "solo";
@@ -41,6 +43,8 @@ interface GameStore {
   racePlacement: number | null;
   raceStopped: boolean;
   winnerPlayerId: string;
+  roomCreatorPlayerId: string;
+  roomSettings: RoomSettings;
   trackLengthMeters: number;
   totalLaps: number;
   latestTick: number;
@@ -83,6 +87,8 @@ const initialState = {
   racePlacement: null as number | null,
   raceStopped: false,
   winnerPlayerId: "",
+  roomCreatorPlayerId: "",
+  roomSettings: buildDefaultRoomSettings(""),
   trackLengthMeters: 3000,
   totalLaps: 1,
   latestTick: 0,
@@ -122,6 +128,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       racePlacement: null,
       raceStopped: false,
       winnerPlayerId: "",
+      roomCreatorPlayerId: "",
+      roomSettings: buildDefaultRoomSettings(normalizedRoomId),
       baseSpeedMps: initialState.baseSpeedMps,
       latestTick: 0,
       players: {},
@@ -143,6 +151,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       connection: "connected",
       connectionErrorMessage: "",
       baseSpeedMps: Number.isFinite(message.baseSpeedMps) ? Math.max(0, message.baseSpeedMps) : initialState.baseSpeedMps,
+      roomCreatorPlayerId: message.roomCreatorPlayerId || message.targetPlayerId,
+      roomSettings: normalizeRoomSettings(message.roomId, message.roomSettings, 2),
       totalLaps: message.totalLaps,
       trackLengthMeters: message.trackLengthMeters
     });
@@ -159,6 +169,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const raceStartedAtFromServer = typeof message.raceStartedAtMs === "number" ? message.raceStartedAtMs : 0;
       const receivedAtMs = Date.now();
       const winnerPlayerId = message.winnerPlayerId ?? "";
+      const minimumPlayers = Math.max(2, message.players.length || state.playerIds.length || 0);
+      const roomCreatorPlayerId = typeof message.roomCreatorPlayerId === "string"
+        ? message.roomCreatorPlayerId
+        : state.roomCreatorPlayerId;
+      const roomSettings = normalizeRoomSettings(
+        message.roomId || state.roomId,
+        message.roomSettings ?? state.roomSettings,
+        minimumPlayers
+      );
       const playersById: Record<string, PlayerSnapshot> = {};
       const playerSyncMeta: Record<string, PlayerSyncMeta> = {};
       for (const player of message.players) {
@@ -268,6 +287,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         racePlacement,
         raceStopped,
         winnerPlayerId,
+        roomCreatorPlayerId,
+        roomSettings,
         question,
         decision
       };

@@ -16,7 +16,9 @@ import type {
   QuestionMessage,
   RaceHistoryRow,
   RacePhase,
+  RoomSettings,
   RoomJoinedMessage,
+  UpdateRoomSettingsRequest,
   RoomMutationResult
 } from "./contracts.ts";
 import { normalizeDisplayName } from "./input.ts";
@@ -47,6 +49,15 @@ const DEFAULT_TOTAL_LAPS = 1;
 const RACE_START_COUNTDOWN_MS = 2600;
 const HIGHWAY_CHOICE = "HIGHWAY";
 const DIRT_CHOICE = "DIRT";
+const DEFAULT_MAX_PLAYERS = 4;
+const MIN_MAX_PLAYERS = 2;
+const MAX_MAX_PLAYERS = 4;
+const DEFAULT_RACE_DURATION_SECONDS = 180;
+const MIN_RACE_DURATION_SECONDS = 60;
+const MAX_RACE_DURATION_SECONDS = 600;
+const DEFAULT_QUESTION_TIME_LIMIT_SECONDS = 8;
+const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
+const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
 
 function round(value: number) {
   return Math.round(value * 100) / 100;
@@ -54,6 +65,62 @@ function round(value: number) {
 
 function sanitizeFinite(value: number, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
+}
+
+function clampInteger(value: number, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function buildDefaultRaceName(roomId: string) {
+  return roomId.trim()
+    ? `${roomId.trim().replace(/[-_]+/g, " ")} setup`
+    : "Classroom Race";
+}
+
+function buildDefaultRoomSettings(roomId: string): RoomSettings {
+  return {
+    raceName: buildDefaultRaceName(roomId),
+    maxPlayers: DEFAULT_MAX_PLAYERS,
+    raceDurationSeconds: DEFAULT_RACE_DURATION_SECONDS,
+    questionTimeLimitSeconds: DEFAULT_QUESTION_TIME_LIMIT_SECONDS
+  };
+}
+
+function normalizeRoomSettings(
+  roomId: string,
+  roomSettings: Partial<RoomSettings> | null | undefined,
+  minimumPlayers = MIN_MAX_PLAYERS
+): RoomSettings {
+  const defaults = buildDefaultRoomSettings(roomId);
+  const safeMinimumPlayers = Math.max(MIN_MAX_PLAYERS, Math.min(MAX_MAX_PLAYERS, Math.trunc(minimumPlayers)));
+  const raceName = typeof roomSettings?.raceName === "string" && roomSettings.raceName.trim()
+    ? roomSettings.raceName.trim().slice(0, 80)
+    : defaults.raceName;
+
+  return {
+    raceName,
+    maxPlayers: clampInteger(
+      Number(roomSettings?.maxPlayers ?? defaults.maxPlayers),
+      defaults.maxPlayers,
+      safeMinimumPlayers,
+      MAX_MAX_PLAYERS
+    ),
+    raceDurationSeconds: clampInteger(
+      Number(roomSettings?.raceDurationSeconds ?? defaults.raceDurationSeconds),
+      defaults.raceDurationSeconds,
+      MIN_RACE_DURATION_SECONDS,
+      MAX_RACE_DURATION_SECONDS
+    ),
+    questionTimeLimitSeconds: clampInteger(
+      Number(roomSettings?.questionTimeLimitSeconds ?? defaults.questionTimeLimitSeconds),
+      defaults.questionTimeLimitSeconds,
+      MIN_QUESTION_TIME_LIMIT_SECONDS,
+      MAX_QUESTION_TIME_LIMIT_SECONDS
+    )
+  };
 }
 
 function sortedPlayers(room: GameRoomStateRecord) {
@@ -100,17 +167,40 @@ function hydratePlayerRacePhases(room: GameRoomStateRecord) {
   }
 }
 
+function getSortedPlayerIds(room: GameRoomStateRecord) {
+  return Object.keys(room.players).sort((left, right) => left.localeCompare(right));
+}
+
+function pickNextRoomCreator(room: GameRoomStateRecord) {
+  return getSortedPlayerIds(room)[0] ?? null;
+}
+
+function hydrateRoomSetup(room: GameRoomStateRecord) {
+  room.roomSettings = normalizeRoomSettings(
+    room.roomId,
+    room.roomSettings,
+    Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS)
+  );
+
+  if (!room.roomCreatorPlayerId || !room.players[room.roomCreatorPlayerId]) {
+    room.roomCreatorPlayerId = pickNextRoomCreator(room);
+  }
+}
+
 function allPlayersInLobby(room: GameRoomStateRecord) {
   const players = Object.values(room.players);
   return players.length > 0 && players.every((player) => player.racePhase === "lobby");
 }
 
-function anyPlayersStillRacing(room: GameRoomStateRecord) {
+function anyPlayersActivelyRacing(room: GameRoomStateRecord) {
   return Object.values(room.players).some((player) => (
     player.racePhase === "starting"
     || player.racePhase === "active"
-    || player.racePhase === "finish"
   ));
+}
+
+function anyPlayersWaitingInLobby(room: GameRoomStateRecord) {
+  return Object.values(room.players).some((player) => player.racePhase === "lobby");
 }
 
 function buildSession(previous: PlayerSessionRecord | null, sessionId: string, now: number): PlayerSessionRecord {
@@ -170,6 +260,8 @@ export function createRoomState(
     raceStoppedAtMs: 0,
     lastInteractionAtMs: now,
     winnerPlayerId: null,
+    roomCreatorPlayerId: null,
+    roomSettings: buildDefaultRoomSettings(roomId),
     resultHistoryId: null,
     players: {}
   };
@@ -184,8 +276,21 @@ function errorResponse(code: string, message: string, roomId?: string, playerId?
   };
 }
 
-function createPendingQuestion(difficulty: number, highwayChallenge: boolean, now: number): PendingQuestionRecord {
-  const question = generateQuestion(difficulty);
+function createPendingQuestion(
+  room: GameRoomStateRecord,
+  difficulty: number,
+  highwayChallenge: boolean,
+  now: number
+): PendingQuestionRecord {
+  const baseQuestion = generateQuestion(difficulty);
+  const timeLimitMs = Math.max(
+    MIN_QUESTION_TIME_LIMIT_SECONDS * 1000,
+    room.roomSettings.questionTimeLimitSeconds * 1000
+  );
+  const question = {
+    ...baseQuestion,
+    timeLimitMs
+  };
   return {
     question,
     expiresAtMs: now + question.timeLimitMs,
@@ -247,8 +352,8 @@ function currentPrompt(room: GameRoomStateRecord, player: PlayerStateRecord, now
   };
 }
 
-function issueNewQuestion(player: PlayerStateRecord, difficulty: number, highwayChallenge: boolean, now: number) {
-  player.pendingQuestion = createPendingQuestion(difficulty, highwayChallenge, now);
+function issueNewQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, difficulty: number, highwayChallenge: boolean, now: number) {
+  player.pendingQuestion = createPendingQuestion(room, difficulty, highwayChallenge, now);
 }
 
 function calculateDifficulty(player: PlayerStateRecord, correctAnswer: boolean) {
@@ -338,7 +443,7 @@ function activateRace(room: GameRoomStateRecord, startAtMs: number) {
     if (!player.finished) {
       player.highwayChallengeActive = false;
       if (!player.pendingQuestion) {
-        issueNewQuestion(player, 1, false, startAtMs);
+        issueNewQuestion(room, player, 1, false, startAtMs);
       }
     }
   }
@@ -468,7 +573,7 @@ function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRe
   player.correctStreak = 0;
   player.highwayChallengeActive = false;
   player.speedMps = Math.max(MIN_SPEED_MPS, player.speedMps - TIMEOUT_ANSWER_SPEED_PENALTY_MPS);
-  issueNewQuestion(player, 1, false, now);
+  issueNewQuestion(room, player, 1, false, now);
 }
 
 function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
@@ -486,7 +591,7 @@ function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateReco
   player.highwayChallengeActive = false;
 
   if (!player.pendingQuestion && !player.finished) {
-    issueNewQuestion(player, 1, false, now);
+    issueNewQuestion(room, player, 1, false, now);
   }
 }
 
@@ -511,14 +616,25 @@ function pruneInactivePlayers(room: GameRoomStateRecord, now: number) {
 function advanceRoomToNow(room: GameRoomStateRecord, now: number) {
   pruneInactivePlayers(room, now);
   hydratePlayerRacePhases(room);
+  hydrateRoomSetup(room);
 
   if (Object.keys(room.players).length === 0) {
+    room.roomCreatorPlayerId = null;
     resetRoomForNewRace(room, now);
     room.lastInteractionAtMs = now;
     return;
   }
 
   if (allPlayersInLobby(room) && room.racePhase !== "lobby") {
+    resetRoomForNewRace(room, now);
+    return;
+  }
+
+  if (
+    room.racePhase !== "lobby"
+    && !anyPlayersActivelyRacing(room)
+    && anyPlayersWaitingInLobby(room)
+  ) {
     resetRoomForNewRace(room, now);
     return;
   }
@@ -620,6 +736,8 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     raceStopped: room.raceStopped,
     raceStoppedAtMs: room.raceStoppedAtMs,
     winnerPlayerId: room.winnerPlayerId,
+    roomCreatorPlayerId: room.roomCreatorPlayerId ?? "",
+    roomSettings: room.roomSettings,
     players
   };
 }
@@ -631,7 +749,9 @@ function buildJoinMessage(room: GameRoomStateRecord, player: PlayerStateRecord):
     displayName: player.displayName,
     trackLengthMeters: room.trackLengthMeters,
     totalLaps: room.totalLaps,
-    baseSpeedMps: BASE_SPEED_MPS
+    baseSpeedMps: BASE_SPEED_MPS,
+    roomCreatorPlayerId: room.roomCreatorPlayerId ?? player.playerId,
+    roomSettings: room.roomSettings
   };
 }
 
@@ -699,6 +819,19 @@ export function joinRoom(
     };
   }
 
+  if (!isExistingMember && Object.keys(room.players).length >= room.roomSettings.maxPlayers) {
+    return {
+      persist: false,
+      room,
+      response: errorResponse(
+        "ROOM_FULL",
+        "Join rejected: this classroom race is already full.",
+        room.roomId,
+        request.playerId
+      )
+    };
+  }
+
   if (player?.session && player.session.sessionId !== request.sessionId && isFreshSession(player.session, now)) {
     return {
       persist: false,
@@ -735,6 +868,11 @@ export function joinRoom(
     player.displayName = displayName;
   }
 
+  if (!room.roomCreatorPlayerId) {
+    room.roomCreatorPlayerId = player.playerId;
+  }
+  room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length));
+
   player.session = buildSession(player.session, request.sessionId, now);
   player.session.lastJoinAtMs = now;
   room.lastInteractionAtMs = now;
@@ -744,7 +882,7 @@ export function joinRoom(
       player.pendingDecisionPoint = null;
     }
     if (!player.pendingQuestion || now > player.pendingQuestion.expiresAtMs) {
-      issueNewQuestion(player, 1, false, now);
+      issueNewQuestion(room, player, 1, false, now);
     }
   } else {
     player.pendingQuestion = null;
@@ -922,7 +1060,7 @@ export function submitAnswer(
   }
 
   if (!player.pendingQuestion) {
-    issueNewQuestion(player, 1, false, now);
+    issueNewQuestion(room, player, 1, false, now);
     return {
       persist: true,
       room,
@@ -973,7 +1111,7 @@ export function submitAnswer(
   if (correct && shouldOfferDecision(player, now)) {
     decision = issueDecision(room, player, now);
   } else {
-    issueNewQuestion(player, calculateDifficulty(player, correct), false, now);
+    issueNewQuestion(room, player, calculateDifficulty(player, correct), false, now);
   }
 
   const prompt = currentPrompt(room, player, now);
@@ -1039,7 +1177,7 @@ export function submitDecision(
     if (now > (point?.expiresAtMs ?? 0)) {
       player.pendingDecisionPoint = null;
       if (!player.pendingQuestion) {
-        issueNewQuestion(player, 1, false, now);
+        issueNewQuestion(room, player, 1, false, now);
       }
     }
     return {
@@ -1054,11 +1192,11 @@ export function submitDecision(
 
   if (request.choice === HIGHWAY_CHOICE) {
     player.highwayChallengeActive = true;
-    issueNewQuestion(player, 3, true, now);
+    issueNewQuestion(room, player, 3, true, now);
   } else if (request.choice === DIRT_CHOICE) {
     player.highwayChallengeActive = false;
     applyBoost(player, 0.6, 1600, now);
-    issueNewQuestion(player, Math.max(1, calculateDifficulty(player, true) - 1), false, now);
+    issueNewQuestion(room, player, Math.max(1, calculateDifficulty(player, true) - 1), false, now);
   } else {
     player.pendingDecisionPoint = point;
   }
@@ -1098,8 +1236,12 @@ export function leaveRoom(
   if (request.playerId === room.winnerPlayerId) {
     room.winnerPlayerId = null;
   }
+  if (request.playerId === room.roomCreatorPlayerId) {
+    room.roomCreatorPlayerId = pickNextRoomCreator(room);
+  }
   rebalanceLanes(room);
-  if (!anyPlayersStillRacing(room)) {
+  room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS));
+  if (!anyPlayersActivelyRacing(room)) {
     resetRoomForNewRace(room, now);
   }
   room.lastInteractionAtMs = now;
@@ -1144,9 +1286,80 @@ export function returnPlayerToLobby(
   player.session = buildSession(player.session, request.sessionId, now);
   room.lastInteractionAtMs = now;
 
-  if (!anyPlayersStillRacing(room)) {
+  if (!anyPlayersActivelyRacing(room)) {
     resetRoomForNewRace(room, now);
   }
+
+  return {
+    persist: true,
+    room,
+    response: buildResponseForPlayer(room, player, now)
+  };
+}
+
+export function updateRoomSettings(
+  existingRoom: GameRoomStateRecord | null,
+  request: UpdateRoomSettingsRequest,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId, request.playerId)
+    };
+  }
+
+  const room = existingRoom;
+  advanceRoomToNow(room, now);
+  const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, now);
+  if (!player) {
+    return {
+      persist: false,
+      room,
+      response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+
+  if (room.roomCreatorPlayerId && room.roomCreatorPlayerId !== player.playerId) {
+    return {
+      persist: false,
+      room,
+      response: {
+        ...buildResponseForPlayer(room, player, now),
+        error: {
+          code: "ROOM_CREATOR_ONLY",
+          message: "Only the room creator can change teacher setup.",
+          roomId: room.roomId,
+          playerId: request.playerId
+        }
+      }
+    };
+  }
+
+  if (room.racePhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      response: {
+        ...buildResponseForPlayer(room, player, now),
+        error: {
+          code: "ROOM_SETTINGS_LOCKED",
+          message: "Teacher setup can only be edited while the room is in the lobby.",
+          roomId: room.roomId,
+          playerId: request.playerId
+        }
+      }
+    };
+  }
+
+  room.roomCreatorPlayerId = room.roomCreatorPlayerId ?? player.playerId;
+  room.roomSettings = normalizeRoomSettings(
+    room.roomId,
+    request.roomSettings,
+    Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length)
+  );
+  room.lastInteractionAtMs = now;
 
   return {
     persist: true,

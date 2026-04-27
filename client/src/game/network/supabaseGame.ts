@@ -8,6 +8,7 @@ import type {
   DecisionPointMessage,
   GameStateUpdateMessage,
   QuestionMessage,
+  RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
 import { getSupabaseTransportConfig } from "./transportConfig";
@@ -150,6 +151,24 @@ export class SupabaseGameClient {
       this.applyResponse(response);
     } catch (error) {
       console.warn("[supabase] start-race failed", error);
+      useGameStore.getState().setConnection("error");
+    }
+  }
+
+  async updateRoomSettings(roomSettings: RoomSettings) {
+    const sessionPayload = this.getSessionPayload();
+    if (!sessionPayload) {
+      return;
+    }
+
+    try {
+      const response = await this.invoke("update-room-settings", {
+        ...sessionPayload,
+        roomSettings
+      });
+      this.applyResponse(response);
+    } catch (error) {
+      console.warn("[supabase] update-room-settings failed", error);
       useGameStore.getState().setConnection("error");
     }
   }

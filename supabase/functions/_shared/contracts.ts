@@ -1,5 +1,12 @@
 export type RacePhase = "lobby" | "starting" | "active" | "finish";
 
+export interface RoomSettings {
+  raceName: string;
+  maxPlayers: number;
+  raceDurationSeconds: number;
+  questionTimeLimitSeconds: number;
+}
+
 export interface JoinRoomRequest {
   roomId: string;
   playerId: string;
@@ -18,6 +25,10 @@ export interface SyncRoomRequest {
 
 export interface StartRaceRequest extends SyncRoomRequest {}
 
+export interface UpdateRoomSettingsRequest extends SyncRoomRequest {
+  roomSettings: RoomSettings;
+}
+
 export interface AnswerSubmissionRequest extends SyncRoomRequest {
   questionId: string;
   answer: string;
@@ -35,6 +46,8 @@ export interface RoomJoinedMessage {
   trackLengthMeters: number;
   totalLaps: number;
   baseSpeedMps: number;
+  roomCreatorPlayerId: string;
+  roomSettings: RoomSettings;
 }
 
 export interface PlayerSnapshot {
@@ -58,6 +71,8 @@ export interface GameStateUpdateMessage {
   raceStopped: boolean;
   raceStoppedAtMs: number;
   winnerPlayerId: string | null;
+  roomCreatorPlayerId: string;
+  roomSettings: RoomSettings;
   players: PlayerSnapshot[];
 }
 
@@ -169,6 +184,8 @@ export interface GameRoomStateRecord {
   raceStoppedAtMs: number;
   lastInteractionAtMs: number;
   winnerPlayerId: string | null;
+  roomCreatorPlayerId: string | null;
+  roomSettings: RoomSettings;
   resultHistoryId: string | null;
   players: Record<string, PlayerStateRecord>;
 }
