@@ -1,12 +1,19 @@
-import { Sparkles, Text } from "@react-three/drei";
+import { Billboard, Sparkles, Text } from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Group, MathUtils, PerspectiveCamera, PointLight, Vector3 } from "three";
 import { useMemo, useRef } from "react";
 import { useGameStore } from "../store/useGameStore";
+import {
+  getDistanceToFinishMeters,
+  getPlayerProgressRatio,
+  isPlayerOnFinalLap
+} from "../utils/renderMotion";
+import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRenderedPlayers";
 
 const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
+const RACE_START_TRANSITION_MS = 2600;
 
 function laneToX(laneIndex: number) {
   const normalizedLane = Number.isFinite(laneIndex)
@@ -24,6 +31,52 @@ function hashColor(playerId: string) {
   const palette = ["#28f6ff", "#ffc543", "#ff5468", "#64ff84", "#65a8ff"];
   const index = Math.abs(hash) % palette.length;
   return palette[index];
+}
+
+function getLobbySlotPosition(slotIndex: number, totalPlayers: number): [number, number, number] {
+  const safeTotal = Math.max(1, totalPlayers);
+  const positionsByCount: Record<number, Array<[number, number, number]>> = {
+    1: [[0, 1.05, 14.5]],
+    2: [[-3.6, 1.02, 14.6], [3.6, 1.02, 14.6]],
+    3: [[-4.2, 1.04, 15.0], [0, 1.1, 13.2], [4.2, 1.04, 15.0]],
+    4: [[-4.4, 1.04, 15.1], [-1.4, 1.08, 13.7], [1.4, 1.08, 13.7], [4.4, 1.04, 15.1]]
+  };
+
+  const positions = positionsByCount[Math.min(4, safeTotal)] ?? positionsByCount[4];
+  return positions[Math.min(slotIndex, positions.length - 1)] ?? [0, 1.05, 14.5];
+}
+
+function getStartTransitionProgress(racePhase: string, raceStartingAtMs: number, nowMs: number) {
+  if (racePhase === "active" || racePhase === "finish") {
+    return 1;
+  }
+  if (racePhase !== "starting" || raceStartingAtMs <= 0) {
+    return 0;
+  }
+  return MathUtils.clamp(1 - ((raceStartingAtMs - nowMs) / RACE_START_TRANSITION_MS), 0, 1);
+}
+
+function getLobbyToTrackTransform(
+  slotIndex: number,
+  totalPlayers: number,
+  laneIndex: number,
+  racePhase: string,
+  raceStartingAtMs: number,
+  nowMs: number
+) {
+  const transitionProgress = getStartTransitionProgress(racePhase, raceStartingAtMs, nowMs);
+  const easedProgress = MathUtils.smootherstep(transitionProgress, 0, 1);
+  const [lobbyX, lobbyY, lobbyZ] = getLobbySlotPosition(slotIndex, totalPlayers);
+  return {
+    progress: transitionProgress,
+    easedProgress,
+    x: MathUtils.lerp(lobbyX, laneToX(laneIndex), easedProgress),
+    y: MathUtils.lerp(lobbyY, 0.7, easedProgress),
+    z: MathUtils.lerp(lobbyZ, 0, easedProgress),
+    lobbyX,
+    lobbyY,
+    lobbyZ
+  };
 }
 
 const WHEEL_POSITIONS: Array<[number, number, number]> = [
@@ -160,11 +213,17 @@ function NeonCarModel({ color }: { color: string }) {
   );
 }
 
-function CarEntity({ playerId }: { playerId: string }) {
+function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; slotIndex: number; totalPlayers: number }) {
   const groupRef = useRef<Group>(null);
-  const speedRef = useRef(0);
-  const positionRef = useRef(0);
+  const glowRef = useRef<PointLight>(null);
+  const localPlayerId = useGameStore((state) => state.playerId);
+  const displayName = useGameStore((state) => state.players[playerId]?.displayName ?? "Driver");
   const color = useMemo(() => hashColor(playerId), [playerId]);
+  const labelText = playerId === localPlayerId ? "You" : displayName;
+  const labelPanelWidth = useMemo(
+    () => Math.max(1.15, Math.min(3, (labelText.length * 0.18) + 0.45)),
+    [labelText]
+  );
 
   useFrame((_, delta) => {
     const state = useGameStore.getState();
@@ -173,21 +232,84 @@ function CarEntity({ playerId }: { playerId: string }) {
       return;
     }
 
-    const blend = 1 - Math.exp(-delta * 10);
-    speedRef.current = MathUtils.lerp(speedRef.current, player.speedMps, blend);
-    positionRef.current = MathUtils.lerp(positionRef.current, player.positionMeters, blend);
+    const renderedState = getRenderedPlayersSnapshot();
+    const renderedPlayer = renderedState.players[playerId];
+    const nowMs = Date.now();
+    const playerRacePhase = renderedPlayer?.racePhase ?? player.racePhase ?? state.racePhase;
 
-    const z = -positionRef.current * TRACK_Z_SCALE;
-    const x = laneToX(player.laneIndex);
-    groupRef.current.position.set(x, 0.7, z);
-    groupRef.current.rotation.x = Math.min(0.04, speedRef.current / 3000);
-    groupRef.current.scale.z = 1 + Math.min(0.45, speedRef.current / 200);
+    let targetX = 0;
+    let targetY = 0.7;
+    let targetZ = 0;
+    let targetPitch = 0;
+    let targetYaw = 0;
+    let targetScaleZ = 1;
+    let lightIntensity = 5.2;
+
+    if (playerRacePhase === "lobby" || playerRacePhase === "starting") {
+      const transform = getLobbyToTrackTransform(
+        slotIndex,
+        totalPlayers,
+        player.laneIndex,
+        playerRacePhase,
+        state.raceStartingAtMs,
+        nowMs
+      );
+      const idleLift = playerRacePhase === "lobby"
+        ? Math.sin((nowMs / 380) + slotIndex) * 0.05
+        : Math.sin((nowMs / 420) + slotIndex) * 0.015;
+      const lobbyYaw = transform.lobbyX > 0 ? -0.28 : transform.lobbyX < 0 ? 0.28 : 0;
+      targetX = transform.x;
+      targetY = transform.y + idleLift;
+      targetZ = transform.z;
+      targetYaw = MathUtils.lerp(lobbyYaw, 0, transform.easedProgress);
+      targetPitch = MathUtils.lerp(0.02, 0, transform.easedProgress);
+      lightIntensity = 4.6 + (transform.progress * 1.1);
+    } else if (renderedPlayer) {
+      targetX = laneToX(renderedPlayer.laneIndex);
+      targetY = 0.7;
+      targetZ = -renderedPlayer.positionMeters * TRACK_Z_SCALE;
+      targetPitch = Math.min(0.04, renderedPlayer.speedMps / 3000);
+      targetScaleZ = 1 + Math.min(0.45, renderedPlayer.speedMps / 200);
+      lightIntensity = 5.4;
+    }
+
+    groupRef.current.position.set(
+      MathUtils.damp(groupRef.current.position.x, targetX, 7.5, delta),
+      MathUtils.damp(groupRef.current.position.y, targetY, 7.5, delta),
+      MathUtils.damp(groupRef.current.position.z, targetZ, 7.5, delta)
+    );
+    groupRef.current.rotation.x = MathUtils.damp(groupRef.current.rotation.x, targetPitch, 7.5, delta);
+    groupRef.current.rotation.y = MathUtils.damp(groupRef.current.rotation.y, targetYaw, 7.5, delta);
+    groupRef.current.scale.z = MathUtils.damp(groupRef.current.scale.z, targetScaleZ, 7.5, delta);
+
+    if (glowRef.current) {
+      glowRef.current.intensity = MathUtils.damp(glowRef.current.intensity, lightIntensity, 5.5, delta);
+    }
   });
 
   return (
     <group ref={groupRef}>
       <NeonCarModel color={color} />
-      <pointLight color={color} intensity={5.4} distance={15} position={[0, 0.95, 0]} />
+      <Billboard position={[0, 2.05, 0]} follow>
+        <group renderOrder={12}>
+          <mesh position={[0, 0, -0.02]}>
+            <planeGeometry args={[labelPanelWidth, 0.38]} />
+            <meshBasicMaterial color="#04101f" transparent opacity={0.68} depthWrite={false} />
+          </mesh>
+          <Text
+            fontSize={0.2}
+            color="#f8fbff"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.03}
+            outlineColor="#02101c"
+            maxWidth={2.6}
+          >
+            {labelText}
+          </Text>
+        </group>
+      </Billboard>
+      <pointLight ref={glowRef} color={color} intensity={5.4} distance={15} position={[0, 0.95, 0]} />
     </group>
   );
 }
@@ -196,8 +318,8 @@ function CarsLayer() {
   const playerIds = useGameStore((state) => state.playerIds);
   return (
     <group>
-      {playerIds.map((playerId) => (
-        <CarEntity key={playerId} playerId={playerId} />
+      {playerIds.map((playerId, index) => (
+        <CarEntity key={playerId} playerId={playerId} slotIndex={index} totalPlayers={playerIds.length} />
       ))}
     </group>
   );
@@ -264,23 +386,70 @@ function NeonTrack() {
   );
 }
 
+function LobbyBay() {
+  const racePhase = useGameStore((state) => state.racePhase);
+  const padSlots = useMemo(
+    () => Array.from({ length: 4 }, (_, index) => getLobbySlotPosition(index, 4)),
+    []
+  );
+
+  if (racePhase !== "lobby" && racePhase !== "starting") {
+    return null;
+  }
+
+  return (
+    <group>
+      <mesh rotation-x={-Math.PI / 2} receiveShadow position={[0, 0.01, 14.2]}>
+        <planeGeometry args={[22, 16]} />
+        <meshStandardMaterial color="#0c1328" roughness={0.9} metalness={0.14} />
+      </mesh>
+
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 7.5]}>
+        <planeGeometry args={[18, 1.2]} />
+        <meshStandardMaterial color="#28f6ff" emissive="#28f6ff" emissiveIntensity={0.32} />
+      </mesh>
+
+      {padSlots.map(([x, , z], index) => (
+        <group key={`lobby-pad-${index}`}>
+          <mesh position={[x, 0.14, z]} receiveShadow>
+            <boxGeometry args={[3.8, 0.18, 5.4]} />
+            <meshStandardMaterial color="#121a34" emissive="#121a34" emissiveIntensity={0.26} />
+          </mesh>
+          <mesh position={[x, 0.2, z]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[1.25, 1.72, 48]} />
+            <meshBasicMaterial color="#28f6ff" transparent opacity={0.22} />
+          </mesh>
+        </group>
+      ))}
+
+      <mesh position={[0, 2.8, 6.9]}>
+        <boxGeometry args={[13.8, 0.34, 0.32]} />
+        <meshStandardMaterial color="#28f6ff" emissive="#28f6ff" emissiveIntensity={1.05} />
+      </mesh>
+      <mesh position={[-6.8, 1.6, 7.2]}>
+        <boxGeometry args={[0.35, 3.2, 0.35]} />
+        <meshStandardMaterial color="#101c39" emissive="#101c39" emissiveIntensity={0.3} />
+      </mesh>
+      <mesh position={[6.8, 1.6, 7.2]}>
+        <boxGeometry args={[0.35, 3.2, 0.35]} />
+        <meshStandardMaterial color="#101c39" emissive="#101c39" emissiveIntensity={0.3} />
+      </mesh>
+
+      <Text position={[0, 4.15, 7.1]} fontSize={0.56} color="#b9f5ff" anchorX="center" anchorY="middle">
+        WAITING GRID
+      </Text>
+      <Text position={[0, 3.5, 7.1]} fontSize={0.22} color="#ffd58d" anchorX="center" anchorY="middle">
+        Stage cars here before the run starts
+      </Text>
+    </group>
+  );
+}
+
 function SideProgressMarkers() {
+  const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
-  const playerId = useGameStore((state) => state.playerId);
-  const players = useGameStore((state) => state.players);
-
-  const localPlayer = players[playerId];
-  const totalRaceDistance = Math.max(1, trackLengthMeters * Math.max(1, totalLaps));
-  const overallProgressRatio = localPlayer
-    ? Math.min(
-      1,
-      Math.max(
-        0,
-        ((localPlayer.lap * trackLengthMeters) + localPlayer.positionMeters) / totalRaceDistance
-      )
-    )
-    : 0;
+  const { localPlayer } = useRenderedPlayers();
   const markers = useMemo(
     () =>
       Array.from({ length: 10 }, (_, index) => {
@@ -297,23 +466,49 @@ function SideProgressMarkers() {
     [trackLengthMeters]
   );
 
+  if (racePhase !== "active" && racePhase !== "finish") {
+    return null;
+  }
+
+  const overallProgressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
+
   return (
     <group>
       {markers.map((marker) => {
+        const approachFactor = MathUtils.clamp(
+          1 - (Math.abs(overallProgressRatio - marker.progressRatio) / 0.12),
+          0,
+          1
+        );
         const isPassed = marker.progressRatio <= overallProgressRatio;
         const panelColor = marker.progressRatio >= 1 ? "#1f5231" : isPassed ? "#13405f" : "#0f1b38";
-        const panelEmissive = marker.progressRatio >= 1 ? "#64ff84" : isPassed ? "#28f6ff" : "#0f1b38";
-        const textColor = marker.progressRatio >= 1 ? "#a9ffd0" : isPassed ? "#b9f5ff" : "#ffd58d";
+        const panelEmissive = marker.progressRatio >= 1
+          ? "#64ff84"
+          : (isPassed || approachFactor > 0 ? "#28f6ff" : "#0f1b38");
+        const panelEmissiveIntensity = marker.progressRatio >= 1
+          ? 0.6
+          : 0.16 + (isPassed ? 0.24 : 0) + (approachFactor * 0.26);
+        const textColor = marker.progressRatio >= 1
+          ? "#a9ffd0"
+          : (isPassed || approachFactor >= 0.65 ? "#b9f5ff" : "#ffd58d");
 
         return (
           <group key={marker.key} position={[0, 0, marker.z]}>
             <mesh position={[-7.7, 2.2, 0]} castShadow receiveShadow>
               <boxGeometry args={[1.6, 0.84, 0.12]} />
-              <meshStandardMaterial color={panelColor} emissive={panelEmissive} emissiveIntensity={0.45} />
+              <meshStandardMaterial
+                color={panelColor}
+                emissive={panelEmissive}
+                emissiveIntensity={panelEmissiveIntensity}
+              />
             </mesh>
             <mesh position={[7.7, 2.2, 0]} castShadow receiveShadow>
               <boxGeometry args={[1.6, 0.84, 0.12]} />
-              <meshStandardMaterial color={panelColor} emissive={panelEmissive} emissiveIntensity={0.45} />
+              <meshStandardMaterial
+                color={panelColor}
+                emissive={panelEmissive}
+                emissiveIntensity={panelEmissiveIntensity}
+              />
             </mesh>
 
             <Text
@@ -344,32 +539,45 @@ function SideProgressMarkers() {
 }
 
 function FinishGate() {
+  const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
-  const playerId = useGameStore((state) => state.playerId);
-  const players = useGameStore((state) => state.players);
+  const { localPlayer } = useRenderedPlayers();
+  const glowRef = useRef<PointLight>(null);
+  const gateVisible = racePhase === "active" || racePhase === "finish";
+  const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
 
-  const localPlayer = players[playerId];
-  const finalLapActive = Boolean(
-    localPlayer && !localPlayer.finished && localPlayer.lap >= Math.max(0, totalLaps - 1)
-  );
-  const raceFinished = Boolean(localPlayer?.finished);
+  const progressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
+  const distanceToFinishMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
+  const gateApproachFactor = MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
+  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
+  const raceFinished = Boolean(localPlayer && (localPlayer.finished || progressRatio >= 0.999));
   const gateColor = raceFinished ? "#64ff84" : finalLapActive ? "#28f6ff" : "#ffc543";
   const supportColor = raceFinished ? "#95ffbe" : finalLapActive ? "#8be7ff" : "#ffd58d";
-  const haloOpacity = raceFinished ? 0.32 : finalLapActive ? 0.24 : 0.14;
-  const glowRef = useRef<PointLight>(null);
-  const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
+  const haloOpacity = raceFinished ? 0.32 : finalLapActive ? 0.18 + gateApproachFactor * 0.12 : 0.14 + gateApproachFactor * 0.04;
   const gateZ = -trackLengthMeters * TRACK_Z_SCALE;
 
   useFrame(({ clock }) => {
-    if (!glowRef.current) {
+    if (!gateVisible || !glowRef.current) {
       return;
     }
-    const pulseSpeed = raceFinished ? 4.2 : finalLapActive ? 6.2 : 2.4;
+    const pulseSpeed = raceFinished
+      ? 4.2
+      : finalLapActive
+        ? 5.2 + gateApproachFactor
+        : 2.4 + gateApproachFactor * 1.2;
     const pulse = 0.82 + Math.sin(clock.getElapsedTime() * pulseSpeed) * 0.22;
-    const baseIntensity = raceFinished ? 6.4 : finalLapActive ? 10.8 : 5.2;
+    const baseIntensity = raceFinished
+      ? 6.4
+      : finalLapActive
+        ? 8.6 + gateApproachFactor * 3.2
+        : 5.2 + gateApproachFactor * 1.2;
     glowRef.current.intensity = Math.max(0.1, baseIntensity * pulse);
   });
+
+  if (!gateVisible) {
+    return null;
+  }
 
   return (
     <group>
@@ -398,20 +606,37 @@ function FinishGate() {
 
         <mesh castShadow receiveShadow position={[0, 2.4, 0]}>
           <boxGeometry args={[12.8, 0.7, 0.62]} />
-          <meshStandardMaterial color={gateColor} emissive={gateColor} emissiveIntensity={0.64} metalness={0.35} />
+          <meshStandardMaterial
+            color={gateColor}
+            emissive={gateColor}
+            emissiveIntensity={raceFinished ? 0.82 : finalLapActive ? 0.52 + gateApproachFactor * 0.26 : 0.4 + gateApproachFactor * 0.12}
+            metalness={0.35}
+          />
         </mesh>
         <mesh position={[0, 2.41, -0.12]}>
           <boxGeometry args={[11.7, 0.18, 0.12]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={1.55} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 1.7 : finalLapActive ? 1.25 + gateApproachFactor * 0.5 : 1.1}
+          />
         </mesh>
 
         <mesh position={[-5.9, 2.7, 0]}>
           <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={2.3} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 2.5 : finalLapActive ? 1.95 + gateApproachFactor * 0.45 : 1.75}
+          />
         </mesh>
         <mesh position={[5.9, 2.7, 0]}>
           <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial color={supportColor} emissive={supportColor} emissiveIntensity={2.3} />
+          <meshStandardMaterial
+            color={supportColor}
+            emissive={supportColor}
+            emissiveIntensity={raceFinished ? 2.5 : finalLapActive ? 1.95 + gateApproachFactor * 0.45 : 1.75}
+          />
         </mesh>
 
         <mesh position={[0, -2.56, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -435,9 +660,50 @@ function CameraRig() {
       return;
     }
 
-    const speedFactor = Math.min(1.0, localPlayer.speedMps / 110);
-    const targetX = laneToX(localPlayer.laneIndex);
-    const targetZ = -localPlayer.positionMeters * TRACK_Z_SCALE;
+    const nowMs = Date.now();
+    if (game.racePhase === "lobby" || game.racePhase === "starting") {
+      const slotIndex = Math.max(0, game.playerIds.indexOf(game.playerId));
+      const transform = getLobbyToTrackTransform(
+        slotIndex,
+        Math.max(1, game.playerIds.length),
+        localPlayer.laneIndex,
+        game.racePhase,
+        game.raceStartingAtMs,
+        nowMs
+      );
+
+      desiredCameraRef.current.set(
+        MathUtils.lerp(0, transform.x * 0.35, transform.easedProgress),
+        MathUtils.lerp(5.4, 4.1, transform.easedProgress),
+        MathUtils.lerp(transform.lobbyZ + 9.8, transform.z + 11.5, transform.easedProgress)
+      );
+      camera.position.lerp(desiredCameraRef.current, 1 - Math.exp(-delta * 4.6));
+
+      lookAtRef.current.set(
+        transform.x,
+        MathUtils.lerp(1.4, 0.95, transform.easedProgress),
+        MathUtils.lerp(transform.lobbyZ - 4.2, transform.z - 20, transform.easedProgress)
+      );
+      camera.lookAt(lookAtRef.current);
+
+      const perspectiveCamera = camera as PerspectiveCamera;
+      perspectiveCamera.fov = MathUtils.lerp(
+        perspectiveCamera.fov,
+        MathUtils.lerp(47, 58, transform.easedProgress),
+        1 - Math.exp(-delta * 5)
+      );
+      perspectiveCamera.updateProjectionMatrix();
+      return;
+    }
+
+    const renderedLocalPlayer = getRenderedPlayersSnapshot().localPlayer;
+    if (!renderedLocalPlayer) {
+      return;
+    }
+
+    const speedFactor = Math.min(1.0, renderedLocalPlayer.speedMps / 110);
+    const targetX = laneToX(renderedLocalPlayer.laneIndex);
+    const targetZ = -renderedLocalPlayer.positionMeters * TRACK_Z_SCALE;
 
     desiredCameraRef.current.set(
       targetX * 0.55,
@@ -475,8 +741,10 @@ export function RaceScene() {
       <directionalLight position={[5, 12, 6]} intensity={1.25} castShadow />
       <pointLight position={[0, 8, -40]} color="#28f6ff" intensity={25} distance={120} />
       <pointLight position={[0, 6, -120]} color="#ff5468" intensity={16} distance={120} />
+      <pointLight position={[0, 5, 12]} color="#28f6ff" intensity={10} distance={35} />
 
       <NeonTrack />
+      <LobbyBay />
       <SideProgressMarkers />
       <FinishGate />
       <CarsLayer />

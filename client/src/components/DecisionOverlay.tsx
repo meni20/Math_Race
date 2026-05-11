@@ -2,10 +2,11 @@ import { gameSocket } from "../game/network/gameSocket";
 import { useGameStore } from "../game/store/useGameStore";
 
 export function DecisionOverlay() {
+  const racePhase = useGameStore((state) => state.racePhase);
   const decision = useGameStore((state) => state.decision);
   const clearDecision = useGameStore((state) => state.clearDecision);
 
-  if (!decision) {
+  if (!decision || racePhase !== "active") {
     return null;
   }
 

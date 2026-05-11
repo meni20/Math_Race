@@ -13,6 +13,7 @@ import com.asphalt8.backend.game.dto.GameStateUpdateMessage;
 import com.asphalt8.backend.game.dto.JoinRoomRequest;
 import com.asphalt8.backend.game.dto.PlayerSnapshot;
 import com.asphalt8.backend.game.dto.RoomJoinedMessage;
+import com.asphalt8.backend.game.dto.RoomSettings;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,34 +48,35 @@ public class GameCommandServiceTest {
     @Test
     public void handleJoinBroadcastsImmediateStateToEveryoneInRoom() {
         JoinRoomRequest request = new JoinRoomRequest("arena-1", "p-1", "Player One");
-        RoomJoinedMessage joinedMessage = new RoomJoinedMessage("arena-1", "p-1", "Player One", 3000.0, 1, 42.0);
+        RoomSettings roomSettings = new RoomSettings("Arena 1 setup", 4, 180, 8);
+        RoomJoinedMessage joinedMessage = new RoomJoinedMessage("arena-1", "p-1", "Player One", 3000.0, 1, 42.0, "p-1", roomSettings);
         GameStateUpdateMessage initialState = new GameStateUpdateMessage(
             "arena-1",
             1234L,
             0L,
-            1200L,
+            "lobby",
+            0L,
+            0L,
             false,
             0L,
             null,
-            List.of(new PlayerSnapshot("p-1", "Player One", 0, 0.0, 42.0, 0, false))
-        );
-        GameStateService.JoinOutcome joinOutcome = new GameStateService.JoinOutcome(
-            joinedMessage,
-            List.of(),
-            false,
-            initialState
+            "p-1",
+            roomSettings,
+            List.of(new PlayerSnapshot("p-1", "Player One", 0, 0.0, 42.0, 0, false, "lobby"))
         );
 
         when(inboundRateLimiter.allow("principal-1", "join", 500L)).thenReturn(true);
-        when(sessionBindingService.bind("principal-1", "arena-1", "p-1")).thenReturn(
+        when(sessionBindingService.bind("principal-1", "ws-session-1", "arena-1", "p-1")).thenReturn(
             SessionBindingService.BindResult.accepted(
-                new SessionBindingService.SessionBinding("principal-1", "arena-1", "p-1", System.currentTimeMillis())
+                new SessionBindingService.SessionBinding("principal-1", "ws-session-1", "arena-1", "p-1", System.currentTimeMillis())
             )
         );
         when(sessionBindingService.resolvePrincipalsByRoom("arena-1")).thenReturn(List.of("principal-1", "principal-2"));
-        when(gameStateService.joinRoom(any(JoinRoomRequest.class))).thenReturn(joinOutcome);
+        when(gameStateService.joinRoom(any(JoinRoomRequest.class))).thenReturn(
+            GameStateService.JoinOutcome.accepted(joinedMessage, initialState, null, null)
+        );
 
-        gameCommandService.handleJoin(request, "principal-1");
+        gameCommandService.handleJoin(request, "principal-1", "ws-session-1");
 
         verify(messagingTemplate).convertAndSendToUser("principal-1", "/queue/game.joined", joinedMessage);
         verify(messagingTemplate).convertAndSendToUser("principal-1", "/queue/game.state", initialState);
@@ -87,7 +89,7 @@ public class GameCommandServiceTest {
         JoinRoomRequest request = new JoinRoomRequest("arena-1", "p-1", "Player One");
         when(inboundRateLimiter.allow("principal-1", "join", 500L)).thenReturn(false);
 
-        gameCommandService.handleJoin(request, "principal-1");
+        gameCommandService.handleJoin(request, "principal-1", "ws-session-1");
 
         ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
         verify(messagingTemplate).convertAndSendToUser(eq("principal-1"), eq("/queue/game.error"), payloadCaptor.capture());
@@ -107,11 +109,11 @@ public class GameCommandServiceTest {
         JoinRoomRequest request = new JoinRoomRequest("arena-1", "", "Player One");
         when(inboundRateLimiter.allow("principal-1", "join", 500L)).thenReturn(true);
 
-        gameCommandService.handleJoin(request, "principal-1");
+        gameCommandService.handleJoin(request, "principal-1", "ws-session-1");
 
         ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
         verify(messagingTemplate).convertAndSendToUser(eq("principal-1"), eq("/queue/game.error"), payloadCaptor.capture());
-        verify(sessionBindingService, never()).bind(any(), any(), any());
+        verify(sessionBindingService, never()).bind(any(), any(), any(), any());
         verifyNoInteractions(gameStateService);
 
         Object payload = payloadCaptor.getValue();

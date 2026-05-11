@@ -7,6 +7,7 @@ public record PlayerSnapshot(
     double positionMeters,
     double speedMps,
     int lap,
-    boolean finished
+    boolean finished,
+    String racePhase
 ) {
 }

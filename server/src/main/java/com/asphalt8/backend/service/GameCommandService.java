@@ -3,7 +3,12 @@ package com.asphalt8.backend.service;
 import com.asphalt8.backend.game.dto.AnswerFeedbackMessage;
 import com.asphalt8.backend.game.dto.AnswerSubmissionRequest;
 import com.asphalt8.backend.game.dto.DecisionChoiceRequest;
+import com.asphalt8.backend.game.dto.DecisionPointMessage;
+import com.asphalt8.backend.game.dto.GameStateUpdateMessage;
 import com.asphalt8.backend.game.dto.JoinRoomRequest;
+import com.asphalt8.backend.game.dto.QuestionMessage;
+import com.asphalt8.backend.game.dto.RoomPlayerRequest;
+import com.asphalt8.backend.game.dto.UpdateRoomSettingsRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -33,16 +38,9 @@ public class GameCommandService {
         this.messagingTemplate = messagingTemplate;
     }
 
-    public void handleJoin(JoinRoomRequest request, String principalName) {
+    public void handleJoin(JoinRoomRequest request, String principalName, String websocketSessionId) {
         if (!inboundRateLimiter.allow(principalName, "join", 500L)) {
-            log.warn("Dropped game.join by rate limiter for principal={}", principalName);
-            sendJoinError(
-                principalName,
-                request.roomId(),
-                request.playerId(),
-                "JOIN_RATE_LIMITED",
-                "Join rejected: too many requests. Please retry in a moment."
-            );
+            sendError(principalName, request.roomId(), request.playerId(), "JOIN_RATE_LIMITED", "Join rejected: too many requests. Please retry in a moment.");
             return;
         }
 
@@ -52,78 +50,116 @@ public class GameCommandService {
             normalizedRoomId = GameInputValidator.normalizeRoomId(request.roomId(), false);
             normalizedPlayerId = GameInputValidator.normalizePlayerId(request.playerId(), false);
         } catch (IllegalArgumentException ex) {
-            log.warn("Rejected game.join principal={} because request normalization failed", principalName, ex);
-            sendJoinError(
-                principalName,
-                request.roomId(),
-                request.playerId(),
-                "INVALID_JOIN_REQUEST",
-                "Join rejected: invalid room or player id."
-            );
+            sendError(principalName, request.roomId(), request.playerId(), "INVALID_JOIN_REQUEST", "Join rejected: invalid room or player id.");
             return;
         }
-        String normalizedDisplayName = GameInputValidator.normalizeDisplayName(request.displayName(), normalizedPlayerId);
 
+        String normalizedDisplayName = GameInputValidator.normalizeDisplayName(request.displayName(), normalizedPlayerId);
         SessionBindingService.BindResult bindResult = sessionBindingService.bind(
             principalName,
+            websocketSessionId,
             normalizedRoomId,
             normalizedPlayerId
         );
         if (!bindResult.accepted()) {
-            log.warn(
-                "Rejected game.join principal={} roomId={} playerId={} because binding failed code={}",
-                principalName,
-                normalizedRoomId,
-                normalizedPlayerId,
-                bindResult.errorCode()
-            );
-            sendJoinError(
+            sendError(
                 principalName,
                 normalizedRoomId,
                 normalizedPlayerId,
                 bindResult.errorCode() == null ? "BIND_REJECTED" : bindResult.errorCode(),
-                bindResult.errorMessage() == null
-                    ? "Join rejected: player is already active in another session."
-                    : bindResult.errorMessage()
+                bindResult.errorMessage() == null ? "Join rejected: player is already active in another session." : bindResult.errorMessage()
             );
             return;
         }
 
-        JoinRoomRequest normalizedRequest = new JoinRoomRequest(
-            normalizedRoomId,
-            normalizedPlayerId,
-            normalizedDisplayName
+        GameStateService.JoinOutcome outcome = gameStateService.joinRoom(
+            new JoinRoomRequest(normalizedRoomId, normalizedPlayerId, normalizedDisplayName)
         );
-
-        GameStateService.JoinOutcome joinOutcome = gameStateService.joinRoom(normalizedRequest);
-        var joined = joinOutcome.joinedMessage();
-        var immediateState = joinOutcome.immediateStateUpdate();
-        log.info(
-            "Accepted game.join principal={} roomId={} playerId={} playersInSnapshot={}",
-            principalName,
-            joined.roomId(),
-            joined.targetPlayerId(),
-            immediateState == null ? 0 : immediateState.players().size()
-        );
-
-        sendToPrincipal(principalName, "/queue/game.joined", joined);
-        if (immediateState != null) {
-            var roomPrincipals = sessionBindingService.resolvePrincipalsByRoom(immediateState.roomId());
-            if (roomPrincipals.isEmpty()) {
-                sendToPrincipal(principalName, "/queue/game.state", immediateState);
-            } else {
-                roomPrincipals.forEach(targetPrincipal -> sendToPrincipal(targetPrincipal, "/queue/game.state", immediateState));
-            }
+        if (!outcome.accepted()) {
+            sessionBindingService.unregister(principalName, websocketSessionId);
+            sendError(
+                principalName,
+                normalizedRoomId,
+                normalizedPlayerId,
+                outcome.errorCode() == null ? "JOIN_REJECTED" : outcome.errorCode(),
+                outcome.errorMessage() == null ? "Join rejected." : outcome.errorMessage()
+            );
+            return;
         }
 
-        for (var question : joinOutcome.questionMessages()) {
-            sessionBindingService
-                .resolvePrincipal(question.roomId(), question.targetPlayerId())
-                .ifPresent(targetPrincipal -> sendToPrincipal(targetPrincipal, "/queue/game.question", question));
+        sendToPrincipal(principalName, "/queue/game.joined", outcome.joinedMessage());
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
+        }
+        sendPromptIfPresent(principalName, outcome.question(), outcome.decision());
+    }
+
+    public void handleSync(RoomPlayerRequest request, String principalName, String websocketSessionId) {
+        if (!inboundRateLimiter.allow(principalName, "sync", 75L)) {
+            return;
+        }
+
+        RoomPlayerRequest normalizedRequest = normalizeRoomPlayerRequest(request);
+        if (normalizedRequest == null) {
+            sendError(principalName, request.roomId(), request.playerId(), "INVALID_REQUEST", "Invalid room or player id.");
+            return;
+        }
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRequest.roomId(), normalizedRequest.playerId())) {
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
+            return;
+        }
+
+        GameStateService.CommandOutcome outcome = gameStateService.syncRoom(normalizedRequest);
+        if (!outcome.accepted()) {
+            sendStateIfPresent(principalName, outcome.stateUpdate());
+            sendError(
+                principalName,
+                normalizedRequest.roomId(),
+                normalizedRequest.playerId(),
+                outcome.errorCode() == null ? "SYNC_REJECTED" : outcome.errorCode(),
+                outcome.errorMessage() == null ? "Sync rejected." : outcome.errorMessage()
+            );
+            return;
+        }
+
+        sendStateIfPresent(principalName, outcome.stateUpdate());
+        sendPromptIfPresent(principalName, outcome.question(), outcome.decision());
+    }
+
+    public void handleStartRace(RoomPlayerRequest request, String principalName, String websocketSessionId) {
+        if (!inboundRateLimiter.allow(principalName, "start", 250L)) {
+            return;
+        }
+
+        RoomPlayerRequest normalizedRequest = normalizeRoomPlayerRequest(request);
+        if (normalizedRequest == null) {
+            sendError(principalName, request.roomId(), request.playerId(), "INVALID_REQUEST", "Invalid room or player id.");
+            return;
+        }
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRequest.roomId(), normalizedRequest.playerId())) {
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
+            return;
+        }
+
+        GameStateService.CommandOutcome outcome = gameStateService.startRace(normalizedRequest);
+        if (!outcome.accepted()) {
+            sendStateIfPresent(principalName, outcome.stateUpdate());
+            sendError(
+                principalName,
+                normalizedRequest.roomId(),
+                normalizedRequest.playerId(),
+                outcome.errorCode() == null ? "START_REJECTED" : outcome.errorCode(),
+                outcome.errorMessage() == null ? "Start rejected." : outcome.errorMessage()
+            );
+            return;
+        }
+
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
         }
     }
 
-    public void handleAnswer(AnswerSubmissionRequest request, String principalName) {
+    public void handleAnswer(AnswerSubmissionRequest request, String principalName, String websocketSessionId) {
         if (!inboundRateLimiter.allow(principalName, "answer", 75L)) {
             return;
         }
@@ -137,40 +173,31 @@ public class GameCommandService {
             return;
         }
 
-        if (!sessionBindingService.isAuthorized(principalName, normalizedRoomId, normalizedPlayerId)) {
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRoomId, normalizedPlayerId)) {
+            sendError(principalName, normalizedRoomId, normalizedPlayerId, "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
             return;
         }
 
-        AnswerSubmissionRequest normalizedRequest = new AnswerSubmissionRequest(
-            normalizedRoomId,
-            normalizedPlayerId,
-            request.questionId(),
-            request.answer()
+        GameStateService.AnswerOutcome outcome = gameStateService.submitAnswer(
+            new AnswerSubmissionRequest(normalizedRoomId, normalizedPlayerId, request.questionId(), request.answer())
         );
-
-        GameStateService.AnswerOutcome outcome = gameStateService.submitAnswer(normalizedRequest);
-        if (outcome.roomId() == null || outcome.playerId() == null) {
+        if (outcome.errorCode() != null) {
+            sendError(principalName, normalizedRoomId, normalizedPlayerId, outcome.errorCode(), outcome.errorMessage());
             return;
         }
-
-        String targetPrincipal = sessionBindingService
-            .resolvePrincipal(outcome.roomId(), outcome.playerId())
-            .orElse(principalName);
 
         sendToPrincipal(
-            targetPrincipal,
+            principalName,
             "/queue/game.answer-feedback",
             new AnswerFeedbackMessage(outcome.roomId(), outcome.playerId(), outcome.accepted(), outcome.correct())
         );
-        if (outcome.nextQuestion() != null) {
-            sendToPrincipal(targetPrincipal, "/queue/game.question", outcome.nextQuestion());
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
         }
-        if (outcome.decisionPoint() != null) {
-            sendToPrincipal(targetPrincipal, "/queue/game.decision", outcome.decisionPoint());
-        }
+        sendPromptIfPresent(principalName, outcome.question(), outcome.decision());
     }
 
-    public void handleDecision(DecisionChoiceRequest request, String principalName) {
+    public void handleDecision(DecisionChoiceRequest request, String principalName, String websocketSessionId) {
         if (!inboundRateLimiter.allow(principalName, "decision", 120L)) {
             return;
         }
@@ -184,43 +211,129 @@ public class GameCommandService {
             return;
         }
 
-        if (!sessionBindingService.isAuthorized(principalName, normalizedRoomId, normalizedPlayerId)) {
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRoomId, normalizedPlayerId)) {
+            sendError(principalName, normalizedRoomId, normalizedPlayerId, "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
             return;
         }
 
-        DecisionChoiceRequest normalizedRequest = new DecisionChoiceRequest(
-            normalizedRoomId,
-            normalizedPlayerId,
-            request.eventId(),
-            request.choice()
+        GameStateService.DecisionOutcome outcome = gameStateService.chooseDecision(
+            new DecisionChoiceRequest(normalizedRoomId, normalizedPlayerId, request.eventId(), request.choice())
         );
-
-        GameStateService.DecisionOutcome outcome = gameStateService.chooseDecision(normalizedRequest);
-        if (outcome.roomId() == null || outcome.playerId() == null) {
-            return;
-        }
-        if (outcome.nextQuestion() == null) {
+        if (outcome.errorCode() != null) {
+            sendError(principalName, normalizedRoomId, normalizedPlayerId, outcome.errorCode(), outcome.errorMessage());
             return;
         }
 
-        String targetPrincipal = sessionBindingService
-            .resolvePrincipal(outcome.roomId(), outcome.playerId())
-            .orElse(principalName);
-        sendToPrincipal(targetPrincipal, "/queue/game.question", outcome.nextQuestion());
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
+        }
+        if (outcome.nextQuestion() != null) {
+            sendToPrincipal(principalName, "/queue/game.question", outcome.nextQuestion());
+        }
+    }
+
+    public void handleReturnToLobby(RoomPlayerRequest request, String principalName, String websocketSessionId) {
+        RoomPlayerRequest normalizedRequest = normalizeRoomPlayerRequest(request);
+        if (normalizedRequest == null) {
+            sendError(principalName, request.roomId(), request.playerId(), "INVALID_REQUEST", "Invalid room or player id.");
+            return;
+        }
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRequest.roomId(), normalizedRequest.playerId())) {
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
+            return;
+        }
+
+        GameStateService.CommandOutcome outcome = gameStateService.returnPlayerToLobby(normalizedRequest);
+        if (!outcome.accepted()) {
+            sendStateIfPresent(principalName, outcome.stateUpdate());
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), outcome.errorCode(), outcome.errorMessage());
+            return;
+        }
+
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
+        }
+    }
+
+    public void handleLeave(RoomPlayerRequest request, String principalName, String websocketSessionId) {
+        RoomPlayerRequest normalizedRequest = normalizeRoomPlayerRequest(request);
+        if (normalizedRequest == null) {
+            return;
+        }
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRequest.roomId(), normalizedRequest.playerId())) {
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
+            return;
+        }
+
+        GameStateService.CommandOutcome outcome = gameStateService.leaveRoom(normalizedRequest);
+        sessionBindingService.unregister(principalName, websocketSessionId);
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
+        }
+    }
+
+    public void handleUpdateRoomSettings(UpdateRoomSettingsRequest request, String principalName, String websocketSessionId) {
+        RoomPlayerRequest normalizedRequest = normalizeRoomPlayerRequest(new RoomPlayerRequest(request.roomId(), request.playerId()));
+        if (normalizedRequest == null) {
+            sendError(principalName, request.roomId(), request.playerId(), "INVALID_REQUEST", "Invalid room or player id.");
+            return;
+        }
+        if (!sessionBindingService.isAuthorized(principalName, websocketSessionId, normalizedRequest.roomId(), normalizedRequest.playerId())) {
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), "SESSION_NOT_AUTHORIZED", "Rejoin the room to continue.");
+            return;
+        }
+
+        GameStateService.CommandOutcome outcome = gameStateService.updateRoomSettings(
+            new UpdateRoomSettingsRequest(normalizedRequest.roomId(), normalizedRequest.playerId(), request.roomSettings())
+        );
+        if (!outcome.accepted()) {
+            sendStateIfPresent(principalName, outcome.stateUpdate());
+            sendError(principalName, normalizedRequest.roomId(), normalizedRequest.playerId(), outcome.errorCode(), outcome.errorMessage());
+            return;
+        }
+
+        if (outcome.stateUpdate() != null) {
+            broadcastState(outcome.stateUpdate());
+        }
+    }
+
+    private RoomPlayerRequest normalizeRoomPlayerRequest(RoomPlayerRequest request) {
+        try {
+            return new RoomPlayerRequest(
+                GameInputValidator.normalizeRoomId(request.roomId(), false),
+                GameInputValidator.normalizePlayerId(request.playerId(), false)
+            );
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private void broadcastState(GameStateUpdateMessage stateUpdate) {
+        for (String targetPrincipal : sessionBindingService.resolvePrincipalsByRoom(stateUpdate.roomId())) {
+            sendToPrincipal(targetPrincipal, "/queue/game.state", stateUpdate);
+        }
+    }
+
+    private void sendStateIfPresent(String principalName, GameStateUpdateMessage stateUpdate) {
+        if (stateUpdate != null) {
+            sendToPrincipal(principalName, "/queue/game.state", stateUpdate);
+        }
+    }
+
+    private void sendPromptIfPresent(String principalName, QuestionMessage question, DecisionPointMessage decision) {
+        if (question != null) {
+            sendToPrincipal(principalName, "/queue/game.question", question);
+        }
+        if (decision != null) {
+            sendToPrincipal(principalName, "/queue/game.decision", decision);
+        }
     }
 
     private void sendToPrincipal(String principalName, String destination, Object payload) {
-        log.info("Sending destination={} to principal={}", destination, principalName);
         messagingTemplate.convertAndSendToUser(principalName, destination, payload);
     }
 
-    private void sendJoinError(
-        String principalName,
-        String roomId,
-        String playerId,
-        String code,
-        String message
-    ) {
+    private void sendError(String principalName, String roomId, String playerId, String code, String message) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("code", code);
         payload.put("message", message);

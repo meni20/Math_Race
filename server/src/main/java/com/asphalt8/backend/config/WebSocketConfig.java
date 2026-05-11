@@ -14,6 +14,8 @@ import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.util.StringUtils;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.socket.WebSocketHandler;
 
 @Configuration
@@ -63,7 +65,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @NonNull WebSocketHandler wsHandler,
             @NonNull Map<String, Object> attributes
         ) {
-            String principalName = (String) attributes.computeIfAbsent("principalName", key -> "ws-" + UUID.randomUUID());
+            String resumeToken = UriComponentsBuilder
+                .fromUri(request.getURI())
+                .build()
+                .getQueryParams()
+                .getFirst("resume");
+            String principalName = (String) attributes.computeIfAbsent(
+                "principalName",
+                key -> StringUtils.hasText(resumeToken) ? resumeToken.trim() : "ws-" + UUID.randomUUID()
+            );
             return () -> principalName;
         }
     }

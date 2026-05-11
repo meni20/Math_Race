@@ -11,7 +11,7 @@ public class SessionBindingService {
     private final ConcurrentHashMap<String, SessionBinding> bindingsByPrincipal = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> principalByPlayerKey = new ConcurrentHashMap<>();
 
-    public synchronized BindResult bind(String principalName, String roomId, String playerId) {
+    public synchronized BindResult bind(String principalName, String websocketSessionId, String roomId, String playerId) {
         String playerKey = key(roomId, playerId);
         SessionBinding previousBinding = bindingsByPrincipal.get(principalName);
         if (previousBinding != null) {
@@ -33,18 +33,20 @@ public class SessionBindingService {
             );
         }
 
-        SessionBinding binding = new SessionBinding(principalName, roomId, playerId, System.currentTimeMillis());
+        SessionBinding binding = new SessionBinding(principalName, websocketSessionId, roomId, playerId, System.currentTimeMillis());
         principalByPlayerKey.put(playerKey, principalName);
         bindingsByPrincipal.put(principalName, binding);
         return BindResult.accepted(binding);
     }
 
-    public boolean isAuthorized(String principalName, String roomId, String playerId) {
+    public boolean isAuthorized(String principalName, String websocketSessionId, String roomId, String playerId) {
         SessionBinding binding = bindingsByPrincipal.get(principalName);
         if (binding == null) {
             return false;
         }
-        return binding.roomId().equals(roomId) && binding.playerId().equals(playerId);
+        return binding.websocketSessionId().equals(websocketSessionId)
+            && binding.roomId().equals(roomId)
+            && binding.playerId().equals(playerId);
     }
 
     public Optional<String> resolvePrincipal(String roomId, String playerId) {
@@ -61,7 +63,11 @@ public class SessionBindingService {
             .toList();
     }
 
-    public Optional<SessionBinding> unregister(String principalName) {
+    public Optional<SessionBinding> unregister(String principalName, String websocketSessionId) {
+        SessionBinding current = bindingsByPrincipal.get(principalName);
+        if (current == null || !current.websocketSessionId().equals(websocketSessionId)) {
+            return Optional.empty();
+        }
         SessionBinding removed = bindingsByPrincipal.remove(principalName);
         if (removed == null) {
             return Optional.empty();
@@ -77,6 +83,7 @@ public class SessionBindingService {
 
     public record SessionBinding(
         String principalName,
+        String websocketSessionId,
         String roomId,
         String playerId,
         long boundAtMs
