@@ -215,57 +215,57 @@ export function LobbyPanel() {
     const panelLabel = isSharedSession ? "Shared Room Lobby" : "Solo Staging";
 
     return (
-      <section className="pointer-events-auto absolute left-4 top-4 z-20 w-[min(92vw,24rem)] rounded-3xl border border-cyan-300/28 bg-[linear-gradient(145deg,rgba(6,18,42,0.9),rgba(10,11,32,0.9))] p-5 shadow-[0_0_30px_rgba(40,246,255,0.12)] backdrop-blur-xl">
+      <section className="pointer-events-auto absolute left-3 top-3 z-20 max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-96 overflow-y-auto overflow-x-hidden rounded-2xl border border-cyan-300/28 bg-[linear-gradient(145deg,rgba(6,18,42,0.9),rgba(10,11,32,0.9))] p-3 shadow-[0_0_24px_rgba(40,246,255,0.12)] backdrop-blur-xl sm:left-4 sm:top-4 sm:max-h-[66vh] sm:w-[18rem]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-cyan-200/80">{panelLabel}</p>
-            <h1 className="mt-1 text-xl font-semibold text-cyan-50">{roomId}</h1>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">{panelLabel}</p>
+            <h1 className="mt-1 text-lg font-semibold text-cyan-50">{roomId}</h1>
           </div>
           <span className={`rounded-full px-2 py-1 text-xs font-semibold uppercase ${badgeClass}`}>
             {connection}
           </span>
         </div>
 
-        <p className="mt-3 text-sm text-slate-300">{statusCopy}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-300">{statusCopy}</p>
 
         {isSharedSession ? (
-          <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-slate-950/55 p-4">
-            <div className="flex items-start justify-between gap-3">
+          <div className="mt-3 rounded-xl border border-cyan-300/18 bg-slate-950/55 p-3">
+            <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/75">Teacher Race Setup</p>
-                <p className="mt-1 text-sm font-medium text-cyan-50">{roomSettings.raceName}</p>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/75">Teacher Race Setup</p>
+                <p className="mt-1 text-xs font-medium text-cyan-50">{roomSettings.raceName}</p>
               </div>
-              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-cyan-100">
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-cyan-100">
                 {isRoomCreator ? (showRoomSettingsEditor ? "Room Creator" : "Locked") : "Student View"}
               </span>
             </div>
 
-            <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
-              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Max Players</p>
+            <div className="mt-2 grid gap-1.5 text-xs text-slate-200">
+              <div className="rounded-lg border border-slate-800/90 bg-slate-900/70 px-2.5 py-1.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200/70">Max Players</p>
                 <p className="mt-1 font-medium">{roomSettings.maxPlayers}</p>
               </div>
-              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Race Duration</p>
+              <div className="rounded-lg border border-slate-800/90 bg-slate-900/70 px-2.5 py-1.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200/70">Race Duration</p>
                 <p className="mt-1 font-medium">{formatDurationLabel(roomSettings.raceDurationSeconds)}</p>
               </div>
-              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Question Time</p>
+              <div className="rounded-lg border border-slate-800/90 bg-slate-900/70 px-2.5 py-1.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200/70">Question Time</p>
                 <p className="mt-1 font-medium">{roomSettings.questionTimeLimitSeconds}s</p>
               </div>
-              <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/70">Creator</p>
+              <div className="rounded-lg border border-slate-800/90 bg-slate-900/70 px-2.5 py-1.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200/70">Creator</p>
                 <p className="mt-1 font-medium">{creatorDisplayName}</p>
               </div>
             </div>
 
             {showRoomSettingsEditor ? (
               <>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Race Name</span>
+                <div className="mt-3 grid gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-200/85">Race Name</span>
                     <input
-                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-2.5 py-1.5 text-xs text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
                       value={roomSettingsDraft.raceName}
                       onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceName: event.target.value }))}
                       placeholder="Classroom Race"
@@ -273,9 +273,9 @@ export function LobbyPanel() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Max Players</span>
+                    <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-200/85">Max Players</span>
                     <select
-                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-2.5 py-1.5 text-xs text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
                       value={normalizedRoomSettingsDraft.maxPlayers}
                       onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, maxPlayers: Number(event.target.value) }))}
                     >
@@ -286,9 +286,9 @@ export function LobbyPanel() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Race Duration</span>
+                    <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-200/85">Race Duration</span>
                     <select
-                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-2.5 py-1.5 text-xs text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
                       value={normalizedRoomSettingsDraft.raceDurationSeconds}
                       onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceDurationSeconds: Number(event.target.value) }))}
                     >
@@ -299,9 +299,9 @@ export function LobbyPanel() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-cyan-200/85">Question Time</span>
+                    <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-200/85">Question Time</span>
                     <select
-                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-3 py-2 text-sm text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
+                      className="w-full rounded-lg border border-cyan-400/35 bg-slate-950/80 px-2.5 py-1.5 text-xs text-cyan-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/40"
                       value={normalizedRoomSettingsDraft.questionTimeLimitSeconds}
                       onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, questionTimeLimitSeconds: Number(event.target.value) }))}
                     >
@@ -312,20 +312,20 @@ export function LobbyPanel() {
                   </label>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="mt-3 flex items-center justify-between gap-2">
                   <p className="text-xs text-slate-300/90">Set up the room before the race starts.</p>
                   <button
                     type="button"
                     onClick={onSaveRoomSettings}
                     disabled={!roomSettingsDirty}
-                    className="rounded-xl border border-cyan-300/60 bg-cyan-400/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="shrink-0 rounded-lg border border-cyan-300/60 bg-cyan-400/20 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-300/30 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Save Setup
                   </button>
                 </div>
               </>
             ) : (
-              <p className="mt-4 text-xs text-slate-300/90">
+              <p className="mt-3 text-xs text-slate-300/90">
                 {roomRacePhase !== "lobby" || racePhase !== "lobby"
                   ? "Race setup is locked once the room leaves the lobby."
                   : isRoomCreator
@@ -336,19 +336,19 @@ export function LobbyPanel() {
           </div>
         ) : null}
 
-        <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-slate-950/55 p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/75">Drivers</p>
-          <ul className="mt-3 space-y-2 text-sm">
+        <div className="mt-3 rounded-xl border border-cyan-300/18 bg-slate-950/55 p-3">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/75">Drivers</p>
+          <ul className="mt-2 space-y-1.5 text-xs">
             {roster.map((player) => {
               const isLocal = player.playerId === playerId;
               const isCreator = player.playerId === roomCreatorPlayerId;
               return (
                 <li
                   key={player.playerId}
-                  className="flex items-center justify-between rounded-xl border border-slate-800/90 bg-slate-900/70 px-3 py-2 text-slate-100"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/90 bg-slate-900/70 px-2.5 py-1.5 text-slate-100"
                 >
-                  <span>{player.displayName}{isLocal ? " (you)" : ""}{isCreator ? " · creator" : ""}</span>
-                  <span className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/75">
+                  <span className="min-w-0 truncate">{player.displayName}{isLocal ? " (you)" : ""}{isCreator ? " · creator" : ""}</span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-[0.1em] text-cyan-200/75">
                     {player.racePhase} | Lane {player.laneIndex + 1}
                   </span>
                 </li>
@@ -357,25 +357,25 @@ export function LobbyPanel() {
           </ul>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={onStartRace}
             disabled={!canStartRace}
-            className="rounded-xl border border-cyan-300/60 bg-cyan-400/25 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-cyan-300/60 bg-cyan-400/25 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {racePhase === "starting" ? "Starting..." : "Start Race"}
           </button>
           <button
             type="button"
             onClick={onLeaveRoom}
-            className="rounded-xl border border-rose-300/45 bg-rose-500/15 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/25"
+            className="rounded-lg border border-rose-300/45 bg-rose-500/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-500/25"
           >
             {isSharedSession ? "Leave Room" : "Exit"}
           </button>
         </div>
 
-        <p className="mt-3 text-xs text-slate-300/90">{helperCopy}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-300/90">{helperCopy}</p>
       </section>
     );
   }
