@@ -1,8 +1,8 @@
-import { Billboard, Sparkles, Text } from "@react-three/drei";
+import { Billboard, Clone, Sparkles, Text, useGLTF } from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Group, MathUtils, PerspectiveCamera, PointLight, Vector3 } from "three";
-import { useMemo, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import { useGameStore } from "../store/useGameStore";
 import {
   getDistanceToFinishMeters,
@@ -10,6 +10,7 @@ import {
   isPlayerOnFinalLap
 } from "../utils/renderMotion";
 import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRenderedPlayers";
+import bmwM3CoupeUrl from "../../assets/3d-cars/1993_bmw_m3_coupe_e36.glb";
 
 const TRACK_Z_SCALE = 0.24;
 const LANE_WIDTH = 2.8;
@@ -79,139 +80,17 @@ function getLobbyToTrackTransform(
   };
 }
 
-const WHEEL_POSITIONS: Array<[number, number, number]> = [
-  [-0.72, 0.26, -0.92],
-  [0.72, 0.26, -0.92],
-  [-0.72, 0.26, 0.9],
-  [0.72, 0.26, 0.9]
-];
+function BmwM3CarModel() {
+  const { scene } = useGLTF(bmwM3CoupeUrl);
 
-function NeonCarModel({ color }: { color: string }) {
   return (
-    <group>
-      <mesh castShadow receiveShadow position={[0, 0.5, 0]}>
-        <boxGeometry args={[1.52, 0.3, 2.9]} />
-        <meshStandardMaterial
-          color="#0b1329"
-          emissive="#0b1329"
-          emissiveIntensity={0.35}
-          metalness={0.72}
-          roughness={0.34}
-        />
-      </mesh>
-
-      <mesh castShadow receiveShadow position={[0, 0.74, -0.06]}>
-        <boxGeometry args={[1.22, 0.34, 2.2]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.46}
-          metalness={0.58}
-          roughness={0.23}
-        />
-      </mesh>
-
-      <mesh castShadow receiveShadow position={[0, 0.95, -0.14]}>
-        <boxGeometry args={[0.98, 0.3, 1.1]} />
-        <meshStandardMaterial
-          color="#121f3e"
-          emissive="#0f1a36"
-          emissiveIntensity={0.3}
-          metalness={0.32}
-          roughness={0.28}
-        />
-      </mesh>
-
-      <mesh position={[0, 1.08, -0.1]}>
-        <boxGeometry args={[0.84, 0.05, 0.86]} />
-        <meshStandardMaterial
-          color="#8be7ff"
-          emissive="#8be7ff"
-          emissiveIntensity={0.2}
-          metalness={0.14}
-          roughness={0.08}
-        />
-      </mesh>
-
-      <mesh castShadow receiveShadow position={[0, 1, 1.12]}>
-        <boxGeometry args={[1.08, 0.06, 0.2]} />
-        <meshStandardMaterial
-          color="#0e1630"
-          emissive="#0e1630"
-          emissiveIntensity={0.25}
-          metalness={0.45}
-          roughness={0.35}
-        />
-      </mesh>
-
-      <mesh castShadow receiveShadow position={[0, 0.9, 1.2]}>
-        <boxGeometry args={[0.82, 0.18, 0.12]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.42}
-          metalness={0.48}
-          roughness={0.3}
-        />
-      </mesh>
-
-      <mesh position={[-0.56, 0.68, -0.02]}>
-        <boxGeometry args={[0.04, 0.07, 2.2]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.95} />
-      </mesh>
-      <mesh position={[0.56, 0.68, -0.02]}>
-        <boxGeometry args={[0.04, 0.07, 2.2]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.95} />
-      </mesh>
-
-      <mesh position={[-0.34, 0.75, -1.36]}>
-        <boxGeometry args={[0.24, 0.09, 0.08]} />
-        <meshStandardMaterial color="#8be7ff" emissive="#8be7ff" emissiveIntensity={2.4} />
-      </mesh>
-      <mesh position={[0.34, 0.75, -1.36]}>
-        <boxGeometry args={[0.24, 0.09, 0.08]} />
-        <meshStandardMaterial color="#8be7ff" emissive="#8be7ff" emissiveIntensity={2.4} />
-      </mesh>
-
-      <mesh position={[-0.34, 0.74, 1.34]}>
-        <boxGeometry args={[0.22, 0.08, 0.07]} />
-        <meshStandardMaterial color="#ff5a74" emissive="#ff5a74" emissiveIntensity={2.2} />
-      </mesh>
-      <mesh position={[0.34, 0.74, 1.34]}>
-        <boxGeometry args={[0.22, 0.08, 0.07]} />
-        <meshStandardMaterial color="#ff5a74" emissive="#ff5a74" emissiveIntensity={2.2} />
-      </mesh>
-
-      <mesh position={[0, 0.24, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.88, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.24} />
-      </mesh>
-
-      {WHEEL_POSITIONS.map((position, index) => (
-        <group key={`wheel-${index}`} position={position}>
-          <mesh castShadow receiveShadow rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.27, 0.27, 0.26, 24]} />
-            <meshStandardMaterial
-              color="#050a18"
-              emissive="#050a18"
-              emissiveIntensity={0.15}
-              metalness={0.28}
-              roughness={0.85}
-            />
-          </mesh>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <torusGeometry args={[0.19, 0.04, 12, 24]} />
-            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.58} metalness={0.55} />
-          </mesh>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.09, 0.09, 0.27, 18]} />
-            <meshStandardMaterial color="#d8f8ff" emissive="#d8f8ff" emissiveIntensity={0.12} metalness={0.42} />
-          </mesh>
-        </group>
-      ))}
+    <group rotation={[0, Math.PI, 0]} scale={70}>
+      <Clone object={scene} castShadow receiveShadow />
     </group>
   );
 }
+
+useGLTF.preload(bmwM3CoupeUrl);
 
 function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; slotIndex: number; totalPlayers: number }) {
   const groupRef = useRef<Group>(null);
@@ -289,7 +168,7 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
 
   return (
     <group ref={groupRef}>
-      <NeonCarModel color={color} />
+      <BmwM3CarModel />
       <Billboard position={[0, 2.05, 0]} follow>
         <group renderOrder={12}>
           <mesh position={[0, 0, -0.02]}>
@@ -747,7 +626,9 @@ export function RaceScene() {
       <LobbyBay />
       <SideProgressMarkers />
       <FinishGate />
-      <CarsLayer />
+      <Suspense fallback={null}>
+        <CarsLayer />
+      </Suspense>
       <CameraRig />
       <Sparkles count={70} color="#9dc7ff" scale={[90, 25, 280]} size={2.4} speed={0.45} />
 
