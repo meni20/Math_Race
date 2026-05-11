@@ -17,6 +17,8 @@ public class PlayerState {
     private DecisionPoint pendingDecisionPoint;
     private long decisionCooldownUntilMs;
     private boolean highwayChallengeActive;
+    private String racePhase;
+    private long lastSeenAtMs;
 
     public PlayerState(String playerId, String displayName, int laneIndex, double baseSpeedMps) {
         this.playerId = playerId;
@@ -32,6 +34,8 @@ public class PlayerState {
         this.correctStreak = 0;
         this.decisionCooldownUntilMs = 0L;
         this.highwayChallengeActive = false;
+        this.racePhase = "lobby";
+        this.lastSeenAtMs = System.currentTimeMillis();
     }
 
     public String getPlayerId() {
@@ -148,5 +152,21 @@ public class PlayerState {
 
     public void setHighwayChallengeActive(boolean highwayChallengeActive) {
         this.highwayChallengeActive = highwayChallengeActive;
+    }
+
+    public String getRacePhase() {
+        return racePhase;
+    }
+
+    public void setRacePhase(String racePhase) {
+        this.racePhase = racePhase;
+    }
+
+    public long getLastSeenAtMs() {
+        return lastSeenAtMs;
+    }
+
+    public void setLastSeenAtMs(long lastSeenAtMs) {
+        this.lastSeenAtMs = lastSeenAtMs;
     }
 }

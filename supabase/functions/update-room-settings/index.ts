@@ -32,7 +32,7 @@ Deno.serve(async (request) => {
       admin,
       normalizedPayload.roomId,
       now,
-      (room) => updateRoomSettings(room, normalizedPayload, now)
+      (room, presenceByPlayerId) => updateRoomSettings(room, normalizedPayload, presenceByPlayerId, now)
     );
     return jsonResponse(result.response);
   } catch (error) {
