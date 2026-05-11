@@ -17,6 +17,9 @@ Thumbs.db
 # Server / Gradle
 server/.gradle/
 server/.gradle-user-home/
+server/.gradle-home/
+**/.gradle-home/
+.gradle/
 server/.pg-local/
 server/.tools/
 server/build/
@@ -33,3 +36,6 @@ client/codex_vehicle_debug*.png
 # Logs
 *.log
 .vercel
+
+server/.gradle-home/
+
