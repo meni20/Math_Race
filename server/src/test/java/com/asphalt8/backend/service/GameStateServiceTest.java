@@ -176,4 +176,123 @@ public class GameStateServiceTest {
         assertEquals("lobby", outcome.stateUpdate().racePhase());
         assertEquals("lobby", outcome.stateUpdate().players().get(0).racePhase());
     }
+
+    @Test
+    public void multiplayerHumanFinishDoesNotStopRaceForActiveHumans() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-multi-finish", "p-1", "Player One"));
+        gameStateService.joinRoom(new JoinRoomRequest("arena-multi-finish", "p-2", "Player Two"));
+        GameRoomState room = gameStateService.getRooms().iterator().next();
+        long now = System.currentTimeMillis();
+
+        synchronized (room.getLock()) {
+            room.setRacePhase("active");
+            room.setRaceStartedAtMs(now - 1000L);
+            room.setLastInteractionAtMs(now - 1000L);
+            PlayerState finisher = room.getPlayers().get("p-1");
+            PlayerState racer = room.getPlayers().get("p-2");
+            assertNotNull(finisher);
+            assertNotNull(racer);
+            finisher.setRacePhase("active");
+            finisher.setPositionMeters(995D);
+            finisher.setSpeedMps(100D);
+            finisher.setBaseSpeedMps(100D);
+            racer.setRacePhase("active");
+            racer.setPositionMeters(100D);
+            racer.setSpeedMps(20D);
+            racer.setBaseSpeedMps(20D);
+        }
+
+        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
+
+        assertEquals(1, dispatch.stateUpdates().size());
+        assertEquals("active", dispatch.stateUpdates().get(0).racePhase());
+        assertFalse(dispatch.stateUpdates().get(0).raceStopped());
+        assertEquals("finish", dispatch.stateUpdates().get(0).players().stream()
+            .filter(player -> "p-1".equals(player.playerId()))
+            .findFirst()
+            .orElseThrow()
+            .racePhase());
+        assertEquals("active", dispatch.stateUpdates().get(0).players().stream()
+            .filter(player -> "p-2".equals(player.playerId()))
+            .findFirst()
+            .orElseThrow()
+            .racePhase());
+    }
+
+    @Test
+    public void timerExpiryStopsEveryoneAndRanksByCurrentPosition() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-time-up", "p-1", "Player One"));
+        gameStateService.joinRoom(new JoinRoomRequest("arena-time-up", "p-1-ai-1", "AI Driver"));
+        GameRoomState room = gameStateService.getRooms().iterator().next();
+        long now = System.currentTimeMillis();
+
+        synchronized (room.getLock()) {
+            room.setRoomSettings(new RoomSettings("Short Race", 4, 1, 5));
+            room.setRacePhase("active");
+            room.setRaceStartedAtMs(now - 2000L);
+            room.setLastInteractionAtMs(now - 1500L);
+            PlayerState human = room.getPlayers().get("p-1");
+            PlayerState bot = room.getPlayers().get("p-1-ai-1");
+            assertNotNull(human);
+            assertNotNull(bot);
+            human.setRacePhase("active");
+            human.setPositionMeters(200D);
+            human.setSpeedMps(0D);
+            bot.setRacePhase("active");
+            bot.setPositionMeters(700D);
+            bot.setSpeedMps(0D);
+        }
+
+        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
+
+        assertEquals(1, dispatch.stateUpdates().size());
+        assertEquals("finish", dispatch.stateUpdates().get(0).racePhase());
+        assertTrue(dispatch.stateUpdates().get(0).raceStopped());
+        assertEquals("p-1-ai-1", dispatch.stateUpdates().get(0).winnerPlayerId());
+        assertTrue(dispatch.stateUpdates().get(0).players().stream().allMatch(player -> "finish".equals(player.racePhase())));
+        assertEquals("p-1-ai-1", dispatch.stateUpdates().get(0).players().get(0).playerId());
+    }
+
+    @Test
+    public void singleHumanFinishStopsRaceAndResetsBotsBeforeNextLobby() {
+        gameStateService.joinRoom(new JoinRoomRequest("arena-bot-cleanup", "p-1", "Player One"));
+        gameStateService.joinRoom(new JoinRoomRequest("arena-bot-cleanup", "p-1-ai-1", "AI Driver"));
+        GameRoomState room = gameStateService.getRooms().iterator().next();
+        long now = System.currentTimeMillis();
+
+        synchronized (room.getLock()) {
+            room.setRacePhase("active");
+            room.setRaceStartedAtMs(now - 1000L);
+            room.setLastInteractionAtMs(now - 1000L);
+            PlayerState human = room.getPlayers().get("p-1");
+            PlayerState bot = room.getPlayers().get("p-1-ai-1");
+            assertNotNull(human);
+            assertNotNull(bot);
+            human.setRacePhase("active");
+            human.setPositionMeters(995D);
+            human.setSpeedMps(100D);
+            human.setBaseSpeedMps(100D);
+            bot.setRacePhase("active");
+            bot.setPositionMeters(100D);
+            bot.setSpeedMps(20D);
+            bot.setBaseSpeedMps(20D);
+        }
+
+        GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
+
+        assertEquals("finish", dispatch.stateUpdates().get(0).racePhase());
+        assertTrue(dispatch.stateUpdates().get(0).raceStopped());
+        assertEquals(2, dispatch.stateUpdates().get(0).players().size());
+
+        GameStateService.CommandOutcome returnOutcome = gameStateService.returnPlayerToLobby(
+            new RoomPlayerRequest("arena-bot-cleanup", "p-1")
+        );
+
+        assertTrue(returnOutcome.accepted());
+        assertEquals("lobby", returnOutcome.stateUpdate().racePhase());
+        assertEquals(2, returnOutcome.stateUpdate().players().size());
+        assertTrue(returnOutcome.stateUpdate().players().stream().allMatch(player -> "lobby".equals(player.racePhase())));
+        assertTrue(returnOutcome.stateUpdate().players().stream().allMatch(player -> !player.finished()));
+        assertTrue(returnOutcome.stateUpdate().players().stream().allMatch(player -> player.positionMeters() == 0D));
+    }
 }

@@ -2,6 +2,7 @@ import { Client, StompSubscription } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { useGameStore } from "../store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
+import { normalizeCarId } from "../utils/carSelection";
 import type {
   AnswerFeedbackMessage,
   AnswerSubmissionRequest,
@@ -12,7 +13,8 @@ import type {
   JoinRoomRequest,
   QuestionMessage,
   RoomSettings,
-  RoomJoinedMessage
+  RoomJoinedMessage,
+  CarId
 } from "../types/messages";
 import { DemoRaceClient } from "./demoRace";
 import { SupabaseGameClient } from "./supabaseGame";
@@ -32,6 +34,7 @@ interface StoredWebsocketSession {
   roomId: string;
   playerId: string;
   displayName: string;
+  carId?: CarId;
 }
 
 function canUseSessionStorage() {
@@ -92,7 +95,7 @@ function readPersistedWebsocketSession(): ConnectPayload | null {
     if (!roomId || !playerId || !displayName) {
       return null;
     }
-    return { roomId, playerId, displayName };
+    return { roomId, playerId, displayName, carId: normalizeCarId(parsed.carId) };
   } catch {
     return null;
   }
@@ -303,7 +306,8 @@ class GameSocketClient {
       persistWebsocketSession({
         roomId: payload.roomId,
         playerId: payload.targetPlayerId,
-        displayName: payload.displayName
+        displayName: payload.displayName,
+        carId: normalizeCarId(payload.carId ?? useGameStore.getState().selectedCarId)
       });
       this.startWebsocketSyncLoop();
     }));
@@ -389,7 +393,8 @@ class GameSocketClient {
       const joinRequest: JoinRoomRequest = {
         roomId: normalizedRoomId,
         playerId: normalizedPlayerId,
-        displayName: payload.displayName
+        displayName: payload.displayName,
+        carId: normalizeCarId(payload.carId)
       };
       client.publish({
         destination: "/app/game.join",

@@ -69,6 +69,16 @@ public class GameStateService {
     private static final String PHASE_STARTING = "starting";
     private static final String PHASE_ACTIVE = "active";
     private static final String PHASE_FINISH = "finish";
+    private static final String BOT_ID_MARKER = "-ai-";
+    private static final String DEFAULT_CAR_ID = "bmw-m3";
+    private static final List<String> AVAILABLE_CAR_IDS = List.of(
+        "bmw-m3",
+        "ford-gt",
+        "mercedes-amg",
+        "carson-annihilator",
+        "ferrari-testarossa",
+        "kitano-hydros"
+    );
 
     private final ConcurrentHashMap<String, GameRoomState> rooms = new ConcurrentHashMap<>();
     private final QuestionGeneratorService questionGeneratorService;
@@ -101,6 +111,7 @@ public class GameStateService {
         String roomId = normalizeRoomId(request.roomId());
         String playerId = normalizePlayerId(request.playerId());
         String displayName = normalizeDisplayName(request.displayName(), playerId);
+        String carId = normalizeCarId(request.carId());
         long now = System.currentTimeMillis();
         saveUserProfile(playerId, displayName);
 
@@ -133,10 +144,11 @@ public class GameStateService {
             }
 
             if (player == null) {
-                player = createPlayerState(playerId, displayName, room.getPlayers().size() % 4);
+                player = createPlayerState(playerId, displayName, carId, room.getPlayers().size() % 4);
                 room.getPlayers().put(playerId, player);
             } else {
                 player.setDisplayName(displayName);
+                player.setCarId(carId);
             }
 
             if (room.getRoomCreatorPlayerId() == null) {
@@ -556,8 +568,8 @@ public class GameStateService {
         }
     }
 
-    private PlayerState createPlayerState(String playerId, String displayName, int laneIndex) {
-        return new PlayerState(playerId, displayName, laneIndex, BASE_SPEED_MPS);
+    private PlayerState createPlayerState(String playerId, String displayName, String carId, int laneIndex) {
+        return new PlayerState(playerId, displayName, laneIndex, BASE_SPEED_MPS, normalizeCarId(carId));
     }
 
     private void advanceRoomToNow(GameRoomState room, long now) {
@@ -614,7 +626,15 @@ public class GameStateService {
         long cursor = room.getLastInteractionAtMs();
         long remainingMs = now - room.getLastInteractionAtMs();
         while (remainingMs > 0) {
+            if (hasRaceTimerExpired(room, cursor)) {
+                stopRace(room, topRankedParticipant(room).orElse(null), raceDeadlineMs(room));
+                break;
+            }
             long stepMs = Math.min(remainingMs, MAX_ADVANCE_STEP_MS);
+            long deadlineMs = raceDeadlineMs(room);
+            if (deadlineMs != Long.MAX_VALUE && cursor < deadlineMs && cursor + stepMs > deadlineMs) {
+                stepMs = deadlineMs - cursor;
+            }
             long stepNow = cursor + stepMs;
             double delta = Math.max(0.01, stepMs / 1000.0);
             room.setTick(room.getTick() + 1L);
@@ -623,6 +643,7 @@ public class GameStateService {
             for (PlayerState player : room.getPlayers().values()) {
                 FinishCandidate finishCandidate = updatePlayerMovement(room, player, delta, stepNow);
                 if (finishCandidate != null) {
+                    finishParticipant(player);
                     if (winnerCandidate == null
                         || finishCandidate.crossedAtMs() < winnerCandidate.crossedAtMs()
                         || (finishCandidate.crossedAtMs() == winnerCandidate.crossedAtMs()
@@ -637,11 +658,22 @@ public class GameStateService {
             }
 
             if (!room.isRaceStopped() && winnerCandidate != null) {
-                stopRace(room, winnerCandidate.player(), winnerCandidate.crossedAtMs());
+                if (shouldStopRaceAfterFinish(room, winnerCandidate.player())) {
+                    stopRace(room, winnerCandidate.player(), winnerCandidate.crossedAtMs());
+                } else if (room.getWinnerPlayerId() == null && !isBotPlayer(winnerCandidate.player())) {
+                    room.setWinnerPlayerId(winnerCandidate.player().getPlayerId());
+                }
+            }
+
+            if (!room.isRaceStopped() && hasRaceTimerExpired(room, stepNow)) {
+                stopRace(room, topRankedParticipant(room).orElse(null), raceDeadlineMs(room));
             }
 
             cursor = stepNow;
             remainingMs -= stepMs;
+            if (room.isRaceStopped()) {
+                break;
+            }
         }
 
         room.setLastInteractionAtMs(now);
@@ -749,6 +781,46 @@ public class GameStateService {
 
     private boolean anyPlayersWaitingInLobby(GameRoomState room) {
         return room.getPlayers().values().stream().anyMatch(player -> PHASE_LOBBY.equals(player.getRacePhase()));
+    }
+
+    private long raceDeadlineMs(GameRoomState room) {
+        if (room.getRaceStartedAtMs() <= 0 || room.getRoomSettings() == null) {
+            return Long.MAX_VALUE;
+        }
+        return room.getRaceStartedAtMs() + (room.getRoomSettings().raceDurationSeconds() * 1000L);
+    }
+
+    private boolean hasRaceTimerExpired(GameRoomState room, long now) {
+        return PHASE_ACTIVE.equals(room.getRacePhase())
+            && !room.isRaceStopped()
+            && now >= raceDeadlineMs(room);
+    }
+
+    private long humanParticipantCount(GameRoomState room) {
+        return room.getPlayers().values().stream().filter(player -> !isBotPlayer(player)).count();
+    }
+
+    private boolean shouldStopRaceAfterFinish(GameRoomState room, PlayerState finisher) {
+        if (isBotPlayer(finisher)) {
+            return humanParticipantCount(room) == 0;
+        }
+        long humanCount = humanParticipantCount(room);
+        if (humanCount <= 1) {
+            return true;
+        }
+        return room.getPlayers().values().stream()
+            .filter(player -> !isBotPlayer(player))
+            .allMatch(PlayerState::isFinished);
+    }
+
+    private boolean isBotPlayer(PlayerState player) {
+        String playerId = player.getPlayerId() == null ? "" : player.getPlayerId().trim().toLowerCase();
+        String displayName = player.getDisplayName() == null ? "" : player.getDisplayName().trim().toLowerCase();
+        return playerId.contains(BOT_ID_MARKER)
+            || playerId.startsWith("ai-")
+            || playerId.startsWith("bot-")
+            || displayName.startsWith("ai ")
+            || displayName.startsWith("bot ");
     }
 
     private String normalizeStoredPlayerRacePhase(PlayerState player, GameRoomState room) {
@@ -892,6 +964,16 @@ public class GameStateService {
         return null;
     }
 
+    private void finishParticipant(PlayerState player) {
+        player.setRacePhase(PHASE_FINISH);
+        player.setSpeedMps(0D);
+        player.setBoostUntilMs(0L);
+        player.setBoostSpeedMps(player.getBaseSpeedMps());
+        player.setPendingQuestion(null);
+        player.setPendingDecisionPoint(null);
+        player.setHighwayChallengeActive(false);
+    }
+
     private void stopRace(GameRoomState room, PlayerState winner, long now) {
         if (room.isRaceStopped()) {
             return;
@@ -901,7 +983,7 @@ public class GameStateService {
         room.setRaceStartingAtMs(0L);
         room.setRaceStopped(true);
         room.setRaceStoppedAtMs(now);
-        room.setWinnerPlayerId(winner.getPlayerId());
+        room.setWinnerPlayerId(winner == null ? null : winner.getPlayerId());
         room.setLastInteractionAtMs(now);
 
         for (PlayerState player : room.getPlayers().values()) {
@@ -915,6 +997,18 @@ public class GameStateService {
             player.setPendingDecisionPoint(null);
             player.setHighwayChallengeActive(false);
         }
+    }
+
+    private Optional<PlayerState> topRankedParticipant(GameRoomState room) {
+        return room.getPlayers().values().stream().min(rankingComparator());
+    }
+
+    private Comparator<PlayerState> rankingComparator() {
+        return Comparator
+            .comparingInt(PlayerState::getLap)
+            .reversed()
+            .thenComparing(Comparator.comparingDouble(PlayerState::getPositionMeters).reversed())
+            .thenComparing(PlayerState::getPlayerId);
     }
 
     private void resetPlayerForNewRace(PlayerState player) {
@@ -947,6 +1041,14 @@ public class GameStateService {
         for (PlayerState player : room.getPlayers().values()) {
             resetPlayerForNewRace(player);
         }
+        if (room.getRoomCreatorPlayerId() != null && !room.getPlayers().containsKey(room.getRoomCreatorPlayerId())) {
+            room.setRoomCreatorPlayerId(pickNextRoomCreator(room));
+        }
+        room.setRoomSettings(normalizeRoomSettings(
+            room.getRoomId(),
+            room.getRoomSettings(),
+            Math.max(MIN_MAX_PLAYERS, room.getPlayers().size() == 0 ? MIN_MAX_PLAYERS : room.getPlayers().size())
+        ));
     }
 
     private void issueNewQuestion(GameRoomState room, PlayerState player, int difficulty, boolean highwayChallenge, long now) {
@@ -1020,13 +1122,7 @@ public class GameStateService {
             .getPlayers()
             .values()
             .stream()
-            .sorted(
-                Comparator
-                    .comparingInt(PlayerState::getLap)
-                    .reversed()
-                    .thenComparing(Comparator.comparingDouble(PlayerState::getPositionMeters).reversed())
-                    .thenComparing(PlayerState::getPlayerId)
-            )
+            .sorted(rankingComparator())
             .map(player -> {
                 int safeLap = Math.max(0, Math.min(totalLaps, player.getLap()));
                 int safeLaneIndex = Math.max(0, Math.min(3, player.getLaneIndex()));
@@ -1044,7 +1140,8 @@ public class GameStateService {
                     round(safeSpeed),
                     safeLap,
                     player.isFinished(),
-                    normalizeStoredPlayerRacePhase(player, room)
+                    normalizeStoredPlayerRacePhase(player, room),
+                    normalizeCarId(player.getCarId())
                 );
             })
             .toList();
@@ -1074,7 +1171,8 @@ public class GameStateService {
             room.getTotalLaps(),
             BASE_SPEED_MPS,
             room.getRoomCreatorPlayerId() == null ? player.getPlayerId() : room.getRoomCreatorPlayerId(),
-            room.getRoomSettings()
+            room.getRoomSettings(),
+            normalizeCarId(player.getCarId())
         );
     }
 
@@ -1196,6 +1294,14 @@ public class GameStateService {
 
     private static String normalizeDisplayName(String displayName, String playerId) {
         return GameInputValidator.normalizeDisplayName(displayName, playerId);
+    }
+
+    private static String normalizeCarId(String carId) {
+        if (carId == null || carId.isBlank()) {
+            return DEFAULT_CAR_ID;
+        }
+        String normalizedCarId = carId.trim();
+        return AVAILABLE_CAR_IDS.contains(normalizedCarId) ? normalizedCarId : DEFAULT_CAR_ID;
     }
 
     private static double round(double value) {

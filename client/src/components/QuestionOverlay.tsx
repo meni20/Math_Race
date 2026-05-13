@@ -45,7 +45,7 @@ export function QuestionOverlay() {
   }
 
   return (
-    <section className="pointer-events-auto absolute bottom-4 left-1/2 z-20 w-[min(94vw,34rem)] -translate-x-1/2 rounded-2xl border border-cyan-300/40 bg-slate-900/82 p-4 backdrop-blur-xl">
+    <section className="pointer-events-auto absolute bottom-4 left-1/2 z-20 w-[min(94vw,34rem)] -translate-x-1/2 rounded-2xl border border-cyan-300/40 bg-slate-900/88 p-4 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/85">
           {question.highwayChallenge ? "Highway challenge" : "Math boost"}

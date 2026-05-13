@@ -6,9 +6,11 @@ import type {
   PlayerSnapshot,
   QuestionMessage,
   RacePhase,
+  TrackTheme,
   RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
+import type { CarId } from "../types/messages";
 import {
   buildAnswerPrediction,
   buildDecisionPrediction,
@@ -17,6 +19,7 @@ import {
 } from "../utils/renderMotion";
 import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
+import { DEFAULT_CAR_ID, normalizeCarId } from "../utils/carSelection";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 type SessionMode = "personal" | "shared" | "solo";
@@ -45,6 +48,8 @@ interface GameStore {
   winnerPlayerId: string;
   roomCreatorPlayerId: string;
   roomSettings: RoomSettings;
+  trackTheme: TrackTheme;
+  selectedCarId: CarId;
   trackLengthMeters: number;
   totalLaps: number;
   latestTick: number;
@@ -68,6 +73,8 @@ interface GameStore {
   clearLocalMotionPrediction: () => void;
   clearDecision: () => void;
   clearQuestion: () => void;
+  changeEnvironment: (themeName: TrackTheme) => void;
+  selectCar: (carId: CarId) => void;
   resetSession: () => void;
 }
 
@@ -89,6 +96,8 @@ const initialState = {
   winnerPlayerId: "",
   roomCreatorPlayerId: "",
   roomSettings: buildDefaultRoomSettings(""),
+  trackTheme: "sunny-forest" as TrackTheme,
+  selectedCarId: DEFAULT_CAR_ID,
   trackLengthMeters: 3000,
   totalLaps: 1,
   latestTick: 0,
@@ -130,6 +139,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       winnerPlayerId: "",
       roomCreatorPlayerId: "",
       roomSettings: buildDefaultRoomSettings(normalizedRoomId),
+      selectedCarId: normalizeCarId(get().selectedCarId),
       baseSpeedMps: initialState.baseSpeedMps,
       latestTick: 0,
       players: {},
@@ -154,7 +164,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       roomCreatorPlayerId: message.roomCreatorPlayerId || message.targetPlayerId,
       roomSettings: normalizeRoomSettings(message.roomId, message.roomSettings, 2),
       totalLaps: message.totalLaps,
-      trackLengthMeters: message.trackLengthMeters
+      trackLengthMeters: message.trackLengthMeters,
+      selectedCarId: normalizeCarId(message.carId ?? get().selectedCarId)
     });
   },
   applyStateUpdate: (message) => {
@@ -178,6 +189,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         message.roomSettings ?? state.roomSettings,
         minimumPlayers
       );
+      const trackLengthMeters = Number.isFinite(message.trackLengthMeters)
+        ? Math.max(1, message.trackLengthMeters ?? state.trackLengthMeters)
+        : state.trackLengthMeters;
       const playersById: Record<string, PlayerSnapshot> = {};
       const playerSyncMeta: Record<string, PlayerSyncMeta> = {};
       for (const player of message.players) {
@@ -198,7 +212,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           laneIndex: safeLaneIndex,
           positionMeters: safePosition,
           speedMps: safeSpeed,
-          racePhase: safeRacePhase
+          racePhase: safeRacePhase,
+          carId: normalizeCarId(player.carId ?? (player.playerId === state.playerId ? state.selectedCarId : undefined))
         };
         playerSyncMeta[player.playerId] = {
           receivedAtMs,
@@ -289,6 +304,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         winnerPlayerId,
         roomCreatorPlayerId,
         roomSettings,
+        trackLengthMeters,
         question,
         decision
       };
@@ -382,10 +398,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
   clearQuestion: () => {
     set({ question: null, questionReceivedAtMs: 0 });
   },
+  changeEnvironment: (themeName) => {
+    set({ trackTheme: themeName });
+  },
+  selectCar: (carId) => {
+    set({ selectedCarId: normalizeCarId(carId) });
+  },
   resetSession: () => {
     set({
       ...initialState,
-      displayName: get().displayName
+      displayName: get().displayName,
+      selectedCarId: get().selectedCarId
     });
   }
 }));

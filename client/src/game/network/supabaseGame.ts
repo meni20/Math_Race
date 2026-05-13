@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { useGameStore } from "../store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
+import { normalizeCarId } from "../utils/carSelection";
 import type {
   AnswerFeedbackMessage,
   ConnectPayload,
@@ -56,7 +57,8 @@ export class SupabaseGameClient {
     const normalizedPayload: ConnectPayload = {
       roomId: normalizeRoomId(payload.roomId) || payload.roomId.trim(),
       playerId: normalizePlayerId(payload.playerId) || payload.playerId.trim(),
-      displayName: payload.displayName.trim()
+      displayName: payload.displayName.trim(),
+      carId: normalizeCarId(payload.carId)
     };
 
     this.currentSessionId = buildSessionId();
