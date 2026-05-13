@@ -73,7 +73,7 @@ public class GameCommandService {
         }
 
         GameStateService.JoinOutcome outcome = gameStateService.joinRoom(
-            new JoinRoomRequest(normalizedRoomId, normalizedPlayerId, normalizedDisplayName)
+            new JoinRoomRequest(normalizedRoomId, normalizedPlayerId, normalizedDisplayName, request.carId())
         );
         if (!outcome.accepted()) {
             sessionBindingService.unregister(principalName, websocketSessionId);

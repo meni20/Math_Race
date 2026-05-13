@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -22,8 +22,8 @@ body,
 }
 
 body {
-  font-family: "Rajdhani", sans-serif;
-  background: linear-gradient(160deg, #030712 0%, #090f1d 50%, #10172a 100%);
+  font-family: "Inter", "Roboto", Arial, sans-serif;
+  background: linear-gradient(145deg, #071a38 0%, #082342 42%, #020817 100%);
 }
 
 h1,
@@ -32,5 +32,5 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: "Orbitron", sans-serif;
+  font-family: "Inter", "Roboto", Arial, sans-serif;
 }

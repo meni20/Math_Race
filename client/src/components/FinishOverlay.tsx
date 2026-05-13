@@ -74,7 +74,7 @@ export function FinishOverlay() {
   };
 
   return (
-    <section className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-slate-950/52 backdrop-blur-sm">
+    <section className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-slate-950/68">
       <div className="w-[min(94vw,42rem)] rounded-3xl border border-cyan-200/45 bg-[linear-gradient(145deg,rgba(11,25,57,0.95),rgba(14,9,35,0.92))] p-6 shadow-[0_0_35px_rgba(40,246,255,0.25)]">
         <p className="text-xs uppercase tracking-[0.22em] text-cyan-200/85">Race Complete</p>
         <h2 className="mt-2 text-3xl font-black tracking-[0.04em] text-cyan-50">

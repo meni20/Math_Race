@@ -4,6 +4,7 @@ public class PlayerState {
 
     private final String playerId;
     private String displayName;
+    private String carId;
     private int laneIndex;
     private double positionMeters;
     private double speedMps;
@@ -21,8 +22,13 @@ public class PlayerState {
     private long lastSeenAtMs;
 
     public PlayerState(String playerId, String displayName, int laneIndex, double baseSpeedMps) {
+        this(playerId, displayName, laneIndex, baseSpeedMps, "bmw-m3");
+    }
+
+    public PlayerState(String playerId, String displayName, int laneIndex, double baseSpeedMps, String carId) {
         this.playerId = playerId;
         this.displayName = displayName;
+        this.carId = carId;
         this.laneIndex = laneIndex;
         this.baseSpeedMps = baseSpeedMps;
         this.speedMps = baseSpeedMps;
@@ -48,6 +54,14 @@ public class PlayerState {
 
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
+    }
+
+    public String getCarId() {
+        return carId;
+    }
+
+    public void setCarId(String carId) {
+        this.carId = carId;
     }
 
     public int getLaneIndex() {

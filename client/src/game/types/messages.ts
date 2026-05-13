@@ -1,4 +1,12 @@
 export type RacePhase = "lobby" | "starting" | "active" | "finish";
+export type TrackTheme = "sunny-forest" | "snow-peak" | "fun-world" | "grand_prix";
+export type CarId =
+  | "bmw-m3"
+  | "ford-gt"
+  | "mercedes-amg"
+  | "carson-annihilator"
+  | "ferrari-testarossa"
+  | "kitano-hydros";
 
 export interface RoomSettings {
   raceName: string;
@@ -11,12 +19,14 @@ export interface JoinRoomRequest {
   roomId: string;
   playerId: string;
   displayName: string;
+  carId?: CarId;
 }
 
 export interface ConnectPayload {
   roomId: string;
   playerId: string;
   displayName: string;
+  carId?: CarId;
 }
 
 export interface StartRaceRequest {
@@ -39,6 +49,7 @@ export interface RoomJoinedMessage {
   baseSpeedMps: number;
   roomCreatorPlayerId: string;
   roomSettings: RoomSettings;
+  carId?: CarId;
 }
 
 export interface AnswerSubmissionRequest {
@@ -64,6 +75,7 @@ export interface PlayerSnapshot {
   lap: number;
   finished: boolean;
   racePhase: RacePhase;
+  carId?: CarId;
 }
 
 export interface GameStateUpdateMessage {
@@ -78,6 +90,7 @@ export interface GameStateUpdateMessage {
   winnerPlayerId: string | null;
   roomCreatorPlayerId: string;
   roomSettings: RoomSettings;
+  trackLengthMeters?: number;
   players: PlayerSnapshot[];
 }
 

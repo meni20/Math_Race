@@ -16,7 +16,7 @@ export function DecisionOverlay() {
   };
 
   return (
-    <section className="pointer-events-auto absolute left-1/2 top-1/2 z-30 w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-amber-300/45 bg-slate-950/86 p-5 shadow-neon backdrop-blur-xl">
+    <section className="pointer-events-auto absolute left-1/2 top-1/2 z-30 w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-amber-300/45 bg-slate-950/90 p-5 shadow-neon">
       <p className="text-xs uppercase tracking-[0.2em] text-amber-200/85">Decision Point</p>
       <h2 className="mt-1 text-xl font-bold text-amber-100">{decision.prompt}</h2>
       <p className="mt-2 text-sm text-slate-300">
