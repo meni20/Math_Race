@@ -153,12 +153,7 @@ export function LobbyPanel() {
       .map((currentPlayerId) => players[currentPlayerId])
       .filter((player): player is NonNullable<typeof player> => Boolean(player));
   }, [playerIds, players]);
-  const creatorDisplayName = useMemo(() => {
-    if (roomCreatorPlayerId === playerId) {
-      return "You";
-    }
-    return roster.find((player) => player.playerId === roomCreatorPlayerId)?.displayName ?? "Waiting";
-  }, [playerId, roomCreatorPlayerId, roster]);
+  const hostPlayerId = roster[0]?.playerId ?? roomCreatorPlayerId;
 
   const minimumMaxPlayers = isSharedSession && demoMode
     ? 2
@@ -167,8 +162,8 @@ export function LobbyPanel() {
     () => normalizeRoomSettings(roomId, roomSettingsDraft, minimumMaxPlayers),
     [minimumMaxPlayers, roomId, roomSettingsDraft]
   );
-  const isRoomCreator = isSharedSession && playerId === roomCreatorPlayerId;
-  const canEditRoomSettings = isRoomCreator && racePhase === "lobby" && roomRacePhase === "lobby";
+  const isRoomHost = isSharedSession && playerId === hostPlayerId;
+  const canEditRoomSettings = isRoomHost && racePhase === "lobby" && roomRacePhase === "lobby";
   const showRoomSettingsEditor = canEditRoomSettings;
   const roomSettingsDirty = !areRoomSettingsEqual(normalizedRoomSettingsDraft, roomSettings);
   const currentTrackIndex = Math.max(0, TRACK_THEME_OPTIONS.findIndex((option) => option.value === trackTheme));

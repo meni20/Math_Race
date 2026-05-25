@@ -117,7 +117,7 @@ export function Hud() {
       .slice(0, 4);
   }, [playerIds, players, racePhase, totalLaps, trackLengthMeters]);
 
-  if (connection !== "connected" || !roomId) {
+  if (connection !== "connected" || !roomId || racePhase !== "active") {
     return null;
   }
 

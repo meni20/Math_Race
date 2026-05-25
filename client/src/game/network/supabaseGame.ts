@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { useGameStore } from "../store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 import { normalizeCarId } from "../utils/carSelection";
@@ -8,6 +8,7 @@ import type {
   DecisionChoiceRequest,
   DecisionPointMessage,
   GameStateUpdateMessage,
+  PlayerSnapshot,
   QuestionMessage,
   RoomSettings,
   RoomJoinedMessage
@@ -36,6 +37,20 @@ interface SessionPayload {
   sessionId: string;
 }
 
+interface GameRoomStateRecord {
+  roomId: string;
+  tick: number;
+  racePhase: GameStateUpdateMessage["racePhase"];
+  raceStartingAtMs: number;
+  raceStartedAtMs: number;
+  raceStopped: boolean;
+  raceStoppedAtMs: number;
+  winnerPlayerId: string | null;
+  roomCreatorPlayerId: string | null;
+  roomSettings: RoomSettings;
+  players: Record<string, PlayerSnapshot>;
+}
+
 function buildSessionId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -48,6 +63,7 @@ export class SupabaseGameClient {
   private currentSessionId: string | null = null;
   private currentConnectPayload: ConnectPayload | null = null;
   private syncIntervalId: number | null = null;
+  private roomChannel: RealtimeChannel | null = null;
   private syncGeneration = 0;
   private syncInFlight = false;
 
@@ -75,6 +91,7 @@ export class SupabaseGameClient {
         this.currentConnectPayload = null;
         return;
       }
+      this.subscribeToRoomChanges(normalizedPayload.roomId);
       this.startSyncLoop();
     } catch (error) {
       console.warn("[supabase] join-game failed", error);
@@ -86,6 +103,7 @@ export class SupabaseGameClient {
 
   async disconnect() {
     this.stopSyncLoop();
+    await this.unsubscribeFromRoomChanges();
 
     const sessionPayload = this.getSessionPayload();
     this.currentSessionId = null;
@@ -163,6 +181,7 @@ export class SupabaseGameClient {
       return;
     }
 
+    useGameStore.getState().applyOptimisticRoomSettings(roomSettings);
     try {
       const response = await this.invoke("update-room-settings", {
         ...sessionPayload,
@@ -206,6 +225,39 @@ export class SupabaseGameClient {
     }
   }
 
+  private subscribeToRoomChanges(roomId: string) {
+    void this.unsubscribeFromRoomChanges();
+    const client = this.getClient();
+    this.roomChannel = client
+      .channel(`game-room:${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "game_rooms",
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          const stateJson = (payload.new as { state_json?: GameRoomStateRecord }).state_json;
+          const stateUpdate = this.stateRecordToUpdate(stateJson);
+          if (stateUpdate) {
+            useGameStore.getState().applyStateUpdate(stateUpdate);
+          }
+        }
+      )
+      .subscribe();
+  }
+
+  private async unsubscribeFromRoomChanges() {
+    const channel = this.roomChannel;
+    this.roomChannel = null;
+    if (!channel || !this.client) {
+      return;
+    }
+    await this.client.removeChannel(channel);
+  }
+
   private async sync(generation: number) {
     if (generation !== this.syncGeneration || this.syncInFlight) {
       return;
@@ -231,6 +283,45 @@ export class SupabaseGameClient {
     } finally {
       this.syncInFlight = false;
     }
+  }
+
+  private stateRecordToUpdate(record: GameRoomStateRecord | null | undefined): GameStateUpdateMessage | null {
+    if (!record) {
+      return null;
+    }
+
+    const state = useGameStore.getState();
+    const players = Object.values(record.players ?? {})
+      .sort((left, right) => {
+        const joinedDelta = (left.joinedAtMs ?? 0) - (right.joinedAtMs ?? 0);
+        return joinedDelta || left.playerId.localeCompare(right.playerId);
+      })
+      .map<PlayerSnapshot>((player) => ({
+        playerId: player.playerId,
+        displayName: player.displayName,
+        joinedAtMs: player.joinedAtMs,
+        laneIndex: player.laneIndex,
+        positionMeters: player.positionMeters,
+        speedMps: player.speedMps,
+        lap: player.lap,
+        finished: player.finished,
+        racePhase: player.racePhase
+      }));
+
+    return {
+      roomId: record.roomId,
+      serverTimeMs: Date.now(),
+      tick: Number.isFinite(record.tick) ? record.tick : state.latestTick,
+      racePhase: record.racePhase ?? state.roomRacePhase,
+      raceStartingAtMs: Number.isFinite(record.raceStartingAtMs) ? record.raceStartingAtMs : 0,
+      raceStartedAtMs: Number.isFinite(record.raceStartedAtMs) ? record.raceStartedAtMs : 0,
+      raceStopped: Boolean(record.raceStopped),
+      raceStoppedAtMs: Number.isFinite(record.raceStoppedAtMs) ? record.raceStoppedAtMs : 0,
+      winnerPlayerId: record.winnerPlayerId ?? "",
+      roomCreatorPlayerId: record.roomCreatorPlayerId ?? "",
+      roomSettings: record.roomSettings ?? state.roomSettings,
+      players
+    };
   }
 
   private getClient() {

@@ -69,6 +69,7 @@ export interface DecisionChoiceRequest {
 export interface PlayerSnapshot {
   playerId: string;
   displayName: string;
+  joinedAtMs?: number;
   laneIndex: number;
   positionMeters: number;
   speedMps: number;

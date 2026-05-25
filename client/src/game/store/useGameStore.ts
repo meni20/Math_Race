@@ -65,6 +65,7 @@ interface GameStore {
   prepareJoin: (roomId: string, displayName: string, playerId: string) => void;
   applyJoin: (message: RoomJoinedMessage) => void;
   applyStateUpdate: (message: GameStateUpdateMessage) => void;
+  applyOptimisticRoomSettings: (roomSettings: RoomSettings) => void;
   applyQuestion: (message: QuestionMessage) => void;
   applyDecision: (message: DecisionPointMessage) => void;
   applyAnswerFeedback: (message: AnswerFeedbackMessage) => void;
@@ -309,6 +310,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
         decision
       };
     });
+  },
+  applyOptimisticRoomSettings: (roomSettings) => {
+    set((state) => ({
+      roomSettings: normalizeRoomSettings(
+        state.roomId,
+        roomSettings,
+        Math.max(2, state.playerIds.length || 0)
+      )
+    }));
   },
   applyQuestion: (message) => {
     const state = get();

@@ -134,6 +134,20 @@ function normalizeRoomSettings(
   };
 }
 
+function getPlayerJoinedAtMs(player: PlayerStateRecord) {
+  return Number.isFinite(player.joinedAtMs) ? Number(player.joinedAtMs) : 0;
+}
+
+function rosterPlayers(room: GameRoomStateRecord) {
+  return Object.values(room.players).sort((left, right) => {
+    const joinedDelta = getPlayerJoinedAtMs(left) - getPlayerJoinedAtMs(right);
+    if (joinedDelta !== 0) {
+      return joinedDelta;
+    }
+    return left.playerId.localeCompare(right.playerId);
+  });
+}
+
 function sortedPlayers(room: GameRoomStateRecord) {
   return Object.values(room.players).sort((left, right) => {
     if (left.lap !== right.lap) {
@@ -178,26 +192,28 @@ function hydratePlayerRacePhases(room: GameRoomStateRecord) {
   }
 }
 
-function getSortedPlayerIds(room: GameRoomStateRecord) {
-  return Object.keys(room.players).sort((left, right) => left.localeCompare(right));
-}
-
-function pickNextRoomCreator(room: GameRoomStateRecord) {
-  return getSortedPlayerIds(room)[0] ?? null;
+function pickRoomHost(room: GameRoomStateRecord) {
+  return rosterPlayers(room)[0]?.playerId ?? null;
 }
 
 function hydrateRoomSetup(room: GameRoomStateRecord) {
   const previousCreatorPlayerId = room.roomCreatorPlayerId;
   const previousRoomSettings = room.roomSettings;
+  let fallbackJoinedAtMs = room.createdAtMs;
+  for (const player of Object.values(room.players)) {
+    if (!Number.isFinite(player.joinedAtMs)) {
+      player.joinedAtMs = fallbackJoinedAtMs;
+      fallbackJoinedAtMs += 1;
+    }
+  }
+
   room.roomSettings = normalizeRoomSettings(
     room.roomId,
     room.roomSettings,
     Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS)
   );
 
-  if (!room.roomCreatorPlayerId || !room.players[room.roomCreatorPlayerId]) {
-    room.roomCreatorPlayerId = pickNextRoomCreator(room);
-  }
+  room.roomCreatorPlayerId = pickRoomHost(room);
 
   return previousCreatorPlayerId !== room.roomCreatorPlayerId
     || !areRoomSettingsEqual(previousRoomSettings, room.roomSettings);
@@ -274,10 +290,11 @@ function isFreshSession(session: PlayerSessionRecord | null, now: number) {
   return Boolean(session && (now - session.lastSeenAtMs) <= STALE_SESSION_MS);
 }
 
-function createPlayerState(playerId: string, displayName: string, laneIndex: number): PlayerStateRecord {
+function createPlayerState(playerId: string, displayName: string, laneIndex: number, joinedAtMs: number): PlayerStateRecord {
   return {
     playerId,
     displayName,
+    joinedAtMs,
     laneIndex,
     positionMeters: 0,
     speedMps: BASE_SPEED_MPS,
@@ -524,7 +541,7 @@ function scheduleRaceStart(room: GameRoomStateRecord, now: number) {
 }
 
 function rebalanceLanes(room: GameRoomStateRecord) {
-  const ordered = Object.values(room.players).sort((left, right) => left.playerId.localeCompare(right.playerId));
+  const ordered = rosterPlayers(room);
   for (let index = 0; index < ordered.length; index += 1) {
     ordered[index].laneIndex = index % 4;
   }
@@ -681,7 +698,7 @@ function pruneInactivePlayers(room: GameRoomStateRecord, presenceByPlayerId: Pre
     room.winnerPlayerId = null;
   }
   if (removedCreator) {
-    room.roomCreatorPlayerId = pickNextRoomCreator(room);
+    room.roomCreatorPlayerId = pickRoomHost(room);
   }
 
   if (removedAnyPlayers) {
@@ -794,7 +811,7 @@ function advanceRoomToNow(room: GameRoomStateRecord, presenceByPlayerId: Presenc
 }
 
 function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpdateMessage {
-  const players = sortedPlayers(room).map<PlayerSnapshot>((player) => {
+  const players = rosterPlayers(room).map<PlayerSnapshot>((player) => {
     const safeLap = Math.max(0, Math.min(room.totalLaps, player.lap));
     const safePosition = player.finished
       ? room.trackLengthMeters
@@ -802,6 +819,7 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     return {
       playerId: player.playerId,
       displayName: player.displayName,
+      joinedAtMs: getPlayerJoinedAtMs(player),
       laneIndex: Math.max(0, Math.min(3, Math.trunc(player.laneIndex))),
       positionMeters: round(safePosition),
       speedMps: round(Math.max(0, sanitizeFinite(player.speedMps, 0))),
@@ -821,7 +839,7 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     raceStopped: room.raceStopped,
     raceStoppedAtMs: room.raceStoppedAtMs,
     winnerPlayerId: room.winnerPlayerId,
-    roomCreatorPlayerId: room.roomCreatorPlayerId ?? "",
+    roomCreatorPlayerId: pickRoomHost(room) ?? "",
     roomSettings: room.roomSettings,
     players
   };
@@ -971,15 +989,13 @@ export function joinRoom(
 
   const displayName = normalizeDisplayName(request.displayName, request.playerId);
   if (!player) {
-    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % 4);
+    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % 4, now);
     room.players[player.playerId] = player;
   } else {
     player.displayName = displayName;
   }
 
-  if (!room.roomCreatorPlayerId) {
-    room.roomCreatorPlayerId = player.playerId;
-  }
+  room.roomCreatorPlayerId = pickRoomHost(room);
   room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length));
 
   player.session = buildSession(player.session, request.sessionId, now);
@@ -1042,6 +1058,23 @@ export function startRace(
       room,
       presenceDeletes: advanceResult.presenceDeletes,
       response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+
+  const roomHostPlayerId = pickRoomHost(room);
+  if (roomHostPlayerId && roomHostPlayerId !== player.playerId) {
+    return {
+      persist: false,
+      room,
+      response: {
+        ...buildResponseForPlayer(room, player, now),
+        error: {
+          code: "ROOM_HOST_ONLY",
+          message: "Only the room host can start the race.",
+          roomId: room.roomId,
+          playerId: request.playerId
+        }
+      }
     };
   }
 
@@ -1404,7 +1437,7 @@ export function leaveRoom(
     room.winnerPlayerId = null;
   }
   if (request.playerId === room.roomCreatorPlayerId) {
-    room.roomCreatorPlayerId = pickNextRoomCreator(room);
+    room.roomCreatorPlayerId = pickRoomHost(room);
   }
   rebalanceLanes(room);
   room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS));
@@ -1499,7 +1532,8 @@ export function updateRoomSettings(
     };
   }
 
-  if (room.roomCreatorPlayerId && room.roomCreatorPlayerId !== player.playerId) {
+  const roomHostPlayerId = pickRoomHost(room);
+  if (roomHostPlayerId && roomHostPlayerId !== player.playerId) {
     return {
       persist: false,
       room,
@@ -1507,8 +1541,8 @@ export function updateRoomSettings(
       response: {
         ...buildResponseForPlayer(room, player, now),
         error: {
-          code: "ROOM_CREATOR_ONLY",
-          message: "Only the room creator can change teacher setup.",
+          code: "ROOM_HOST_ONLY",
+          message: "Only the room host can change teacher setup.",
           roomId: room.roomId,
           playerId: request.playerId
         }
@@ -1533,7 +1567,7 @@ export function updateRoomSettings(
     };
   }
 
-  room.roomCreatorPlayerId = room.roomCreatorPlayerId ?? player.playerId;
+  room.roomCreatorPlayerId = roomHostPlayerId ?? player.playerId;
   room.roomSettings = normalizeRoomSettings(
     room.roomId,
     request.roomSettings,

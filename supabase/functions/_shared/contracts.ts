@@ -53,6 +53,7 @@ export interface RoomJoinedMessage {
 export interface PlayerSnapshot {
   playerId: string;
   displayName: string;
+  joinedAtMs?: number;
   laneIndex: number;
   positionMeters: number;
   speedMps: number;
@@ -153,6 +154,7 @@ export interface PlayerSessionRecord {
 export interface PlayerStateRecord {
   playerId: string;
   displayName: string;
+  joinedAtMs?: number;
   laneIndex: number;
   positionMeters: number;
   speedMps: number;
