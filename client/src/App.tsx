@@ -4,6 +4,7 @@ import { FinishOverlay } from "./components/FinishOverlay";
 import { Hud } from "./components/Hud";
 import { LobbyPanel } from "./components/LobbyPanel";
 import { QuestionOverlay } from "./components/QuestionOverlay";
+import { TeacherDashboard } from "./components/teacher/TeacherDashboard";
 import { gameSocket } from "./game/network/gameSocket";
 import { getConfiguredGameTransport } from "./game/network/transportConfig";
 import { MenuScene, RaceScene } from "./game/scene/RaceScene";
@@ -64,6 +65,9 @@ function App() {
     }
 
     const params = new URLSearchParams(window.location.search);
+    if (parseBoolean(params.get("teacher"))) {
+      return;
+    }
     if (!parseBoolean(params.get("autojoin"))) {
       if (getConfiguredGameTransport() !== "websocket") {
         return;
@@ -93,18 +97,22 @@ function App() {
   const showDebugOverlay = typeof window !== "undefined"
     ? parseBoolean(new URLSearchParams(window.location.search).get("debug"))
     : false;
+  const showTeacherDashboard = typeof window !== "undefined"
+    ? parseBoolean(new URLSearchParams(window.location.search).get("teacher"))
+    : false;
   const showResults = racePhase === "finish" || raceStopped;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[linear-gradient(145deg,#071a38_0%,#082342_42%,#020817_100%)] text-slate-100">
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,8,23,0.58)_0%,rgba(2,8,23,0.34)_28%,rgba(2,8,23,0)_62%),linear-gradient(180deg,rgba(148,203,213,0.05),rgba(2,8,23,0.18))]" />
-      {showMenuScene ? <MenuScene /> : <RaceScene />}
-      {showResults ? null : <LobbyPanel />}
-      {showResults ? null : <Hud />}
-      {showResults ? null : <QuestionOverlay />}
-      {showResults ? null : <DecisionOverlay />}
-      <FinishOverlay />
-      {showDebugOverlay ? <DebugOverlay /> : null}
+      {showTeacherDashboard ? null : (showMenuScene ? <MenuScene /> : <RaceScene />)}
+      {showTeacherDashboard || showResults ? null : <LobbyPanel />}
+      {showTeacherDashboard || showResults ? null : <Hud />}
+      {showTeacherDashboard || showResults ? null : <QuestionOverlay />}
+      {showTeacherDashboard || showResults ? null : <DecisionOverlay />}
+      {showTeacherDashboard ? null : <FinishOverlay />}
+      {showTeacherDashboard ? null : (showDebugOverlay ? <DebugOverlay /> : null)}
+      {showTeacherDashboard ? <TeacherDashboard /> : null}
     </main>
   );
 }

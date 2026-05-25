@@ -8,6 +8,7 @@ import { normalizeRoomId } from "../game/utils/gameIds";
 import {
   areRoomSettingsEqual,
   formatDurationLabel,
+  MAX_ROOM_PLAYERS,
   normalizeRoomSettings
 } from "../game/utils/roomSettings";
 
@@ -20,6 +21,14 @@ function buildPlayerId() {
 
 function buildSoloRoomId(playerId: string) {
   return `solo-${playerId}`;
+}
+
+function getInitialRoomInput() {
+  if (typeof window === "undefined") {
+    return "arena-1";
+  }
+  const roomFromUrl = new URLSearchParams(window.location.search).get("room")?.trim();
+  return roomFromUrl || "arena-1";
 }
 
 function formatCountdown(ms: number) {
@@ -81,7 +90,7 @@ export function LobbyPanel() {
   const selectCar = useGameStore((state) => state.selectCar);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
 
-  const [roomInput, setRoomInput] = useState(roomId || "arena-1");
+  const [roomInput, setRoomInput] = useState(roomId || getInitialRoomInput());
   const [nameInput, setNameInput] = useState(displayName || "Neon Racer");
   const [roomSettingsDraft, setRoomSettingsDraft] = useState(roomSettings);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -96,7 +105,9 @@ export function LobbyPanel() {
   const isSharedSession = sessionMode === "shared";
 
   useEffect(() => {
-    setRoomInput(roomId || "arena-1");
+    if (roomId) {
+      setRoomInput(roomId);
+    }
   }, [roomId]);
 
   useEffect(() => {
@@ -157,7 +168,7 @@ export function LobbyPanel() {
 
   const minimumMaxPlayers = isSharedSession && demoMode
     ? 2
-    : Math.max(2, Math.min(4, roster.length || 2));
+    : Math.max(2, Math.min(MAX_ROOM_PLAYERS, roster.length || 2));
   const normalizedRoomSettingsDraft = useMemo(
     () => normalizeRoomSettings(roomId, roomSettingsDraft, minimumMaxPlayers),
     [minimumMaxPlayers, roomId, roomSettingsDraft]
@@ -299,7 +310,7 @@ export function LobbyPanel() {
                   value={normalizedRoomSettingsDraft.maxPlayers}
                   onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, maxPlayers: Number(event.target.value) }))}
                 >
-                  {Array.from({ length: 5 - minimumMaxPlayers }, (_, index) => minimumMaxPlayers + index).map((value) => (
+                  {Array.from({ length: (MAX_ROOM_PLAYERS + 1) - minimumMaxPlayers }, (_, index) => minimumMaxPlayers + index).map((value) => (
                     <option key={`max-${value}`} value={value}>{value}</option>
                   ))}
                 </select>
@@ -384,6 +395,16 @@ export function LobbyPanel() {
         className="pointer-events-auto absolute left-5 top-5 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
       >
         Maps
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          window.location.href = `${window.location.pathname}?teacher=1`;
+        }}
+        className="pointer-events-auto absolute left-5 top-20 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
+      >
+        Teacher
       </button>
 
       <button

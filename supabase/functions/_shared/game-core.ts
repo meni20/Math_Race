@@ -53,9 +53,9 @@ const DEFAULT_TOTAL_LAPS = 1;
 const RACE_START_COUNTDOWN_MS = 2600;
 const HIGHWAY_CHOICE = "HIGHWAY";
 const DIRT_CHOICE = "DIRT";
-const DEFAULT_MAX_PLAYERS = 4;
+const DEFAULT_MAX_PLAYERS = 8;
 const MIN_MAX_PLAYERS = 2;
-const MAX_MAX_PLAYERS = 4;
+const MAX_MAX_PLAYERS = 8;
 const DEFAULT_RACE_DURATION_SECONDS = 180;
 const MIN_RACE_DURATION_SECONDS = 60;
 const MAX_RACE_DURATION_SECONDS = 600;
@@ -543,7 +543,7 @@ function scheduleRaceStart(room: GameRoomStateRecord, now: number) {
 function rebalanceLanes(room: GameRoomStateRecord) {
   const ordered = rosterPlayers(room);
   for (let index = 0; index < ordered.length; index += 1) {
-    ordered[index].laneIndex = index % 4;
+    ordered[index].laneIndex = index % MAX_MAX_PLAYERS;
   }
 }
 
@@ -820,7 +820,7 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
       playerId: player.playerId,
       displayName: player.displayName,
       joinedAtMs: getPlayerJoinedAtMs(player),
-      laneIndex: Math.max(0, Math.min(3, Math.trunc(player.laneIndex))),
+      laneIndex: Math.max(0, Math.min(MAX_MAX_PLAYERS - 1, Math.trunc(player.laneIndex))),
       positionMeters: round(safePosition),
       speedMps: round(Math.max(0, sanitizeFinite(player.speedMps, 0))),
       lap: safeLap,
@@ -989,7 +989,7 @@ export function joinRoom(
 
   const displayName = normalizeDisplayName(request.displayName, request.playerId);
   if (!player) {
-    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % 4, now);
+    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % MAX_MAX_PLAYERS, now);
     room.players[player.playerId] = player;
   } else {
     player.displayName = displayName;

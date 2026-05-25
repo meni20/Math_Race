@@ -1,7 +1,7 @@
 import type { RoomSettings } from "../types/messages";
 
 const MIN_MAX_PLAYERS = 2;
-const MAX_MAX_PLAYERS = 4;
+export const MAX_ROOM_PLAYERS = 8;
 const MIN_RACE_DURATION_SECONDS = 60;
 const MAX_RACE_DURATION_SECONDS = 600;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
@@ -25,7 +25,7 @@ function buildDefaultRaceName(roomId: string) {
 export function buildDefaultRoomSettings(roomId: string): RoomSettings {
   return {
     raceName: buildDefaultRaceName(roomId),
-    maxPlayers: MAX_MAX_PLAYERS,
+    maxPlayers: MAX_ROOM_PLAYERS,
     raceDurationSeconds: 180,
     questionTimeLimitSeconds: 8
   };
@@ -37,14 +37,14 @@ export function normalizeRoomSettings(
   minimumPlayers = MIN_MAX_PLAYERS
 ): RoomSettings {
   const defaults = buildDefaultRoomSettings(roomId);
-  const safeMinimumPlayers = Math.max(MIN_MAX_PLAYERS, Math.min(MAX_MAX_PLAYERS, Math.trunc(minimumPlayers)));
+  const safeMinimumPlayers = Math.max(MIN_MAX_PLAYERS, Math.min(MAX_ROOM_PLAYERS, Math.trunc(minimumPlayers)));
   const raceName = typeof settings?.raceName === "string" && settings.raceName.trim()
     ? settings.raceName.trim().slice(0, 80)
     : defaults.raceName;
 
   return {
     raceName,
-    maxPlayers: clampInteger(settings?.maxPlayers ?? defaults.maxPlayers, defaults.maxPlayers, safeMinimumPlayers, MAX_MAX_PLAYERS),
+    maxPlayers: clampInteger(settings?.maxPlayers ?? defaults.maxPlayers, defaults.maxPlayers, safeMinimumPlayers, MAX_ROOM_PLAYERS),
     raceDurationSeconds: clampInteger(
       settings?.raceDurationSeconds ?? defaults.raceDurationSeconds,
       defaults.raceDurationSeconds,

@@ -21,6 +21,8 @@ import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameI
 import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 import { DEFAULT_CAR_ID, normalizeCarId } from "../utils/carSelection";
 
+const MAX_LANE_INDEX = 7;
+
 type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 type SessionMode = "personal" | "shared" | "solo";
 
@@ -197,7 +199,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const playerSyncMeta: Record<string, PlayerSyncMeta> = {};
       for (const player of message.players) {
         const safeLaneIndex = Number.isFinite(player.laneIndex)
-          ? Math.max(0, Math.min(3, Math.trunc(player.laneIndex)))
+          ? Math.max(0, Math.min(MAX_LANE_INDEX, Math.trunc(player.laneIndex)))
           : 0;
         const safePosition = Number.isFinite(player.positionMeters) ? Math.max(0, player.positionMeters) : 0;
         const safeSpeed = Number.isFinite(player.speedMps) ? Math.max(0, player.speedMps) : 0;

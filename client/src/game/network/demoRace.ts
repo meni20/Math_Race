@@ -101,12 +101,20 @@ function calculateDynamicTrackLengthMeters(roomSettings: RoomSettings) {
 }
 
 function createAiPlayers(localPlayerId: string, count: number) {
-  const names = ["Byte Rider", "Circuit Fox", "Vector Nova"];
+  const names = [
+    "Byte Rider",
+    "Circuit Fox",
+    "Vector Nova",
+    "Pixel Dash",
+    "Orbit Ace",
+    "Turbo Tess",
+    "Neon Max"
+  ];
 
   return names.slice(0, count).map<DemoPlayerState>((displayName, index) => ({
     playerId: `${localPlayerId}-ai-${index + 1}`,
     displayName,
-    laneIndex: Math.min(3, index + 1),
+    laneIndex: Math.min(7, index + 1),
     positionMeters: 0,
     speedMps: 0,
     lap: 0,
