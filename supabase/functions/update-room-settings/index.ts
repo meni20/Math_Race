@@ -21,9 +21,11 @@ Deno.serve(async (request) => {
       sessionId: String(payload.sessionId ?? ""),
       roomSettings: payload.roomSettings ?? {
         raceName: "",
-        maxPlayers: 4,
+        maxPlayers: 8,
         raceDurationSeconds: 180,
-        questionTimeLimitSeconds: 8
+        questionTimeLimitSeconds: 15,
+        targetScore: 500,
+        operations: "MIXED"
       }
     };
     const now = Date.now();

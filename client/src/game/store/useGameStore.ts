@@ -29,6 +29,14 @@ type SessionMode = "personal" | "shared" | "solo";
 interface AnswerFeedbackState {
   correct: boolean;
   accepted: boolean;
+  resultType?: "CORRECT" | "WRONG" | "TIMEOUT";
+  feedback?: "correct" | "wrong" | "timeout";
+  pointsDelta?: number;
+  progressDelta?: number;
+  updatedProgress?: number;
+  streak?: number;
+  expectedAnswer?: number;
+  submittedAnswer?: string;
   receivedAtMs: number;
 }
 
@@ -61,6 +69,8 @@ interface GameStore {
   localMotionPrediction: LocalMotionPrediction | null;
   question: QuestionMessage | null;
   questionReceivedAtMs: number;
+  lastSubmittedQuestionId: string;
+  lastAppliedQuestionIssuedAtMs: number;
   decision: DecisionPointMessage | null;
   answerFeedback: AnswerFeedbackState | null;
   setConnection: (status: ConnectionStatus, errorMessage?: string) => void;
@@ -68,9 +78,10 @@ interface GameStore {
   applyJoin: (message: RoomJoinedMessage) => void;
   applyStateUpdate: (message: GameStateUpdateMessage) => void;
   applyOptimisticRoomSettings: (roomSettings: RoomSettings) => void;
-  applyQuestion: (message: QuestionMessage) => void;
+  applyQuestion: (message: QuestionMessage, source?: "submit-answer" | "sync" | "realtime" | "local") => void;
   applyDecision: (message: DecisionPointMessage) => void;
   applyAnswerFeedback: (message: AnswerFeedbackMessage) => void;
+  markQuestionSubmitted: (questionId: string) => void;
   beginLocalAnswerPrediction: (answer: string) => void;
   beginLocalDecisionPrediction: (choice: "HIGHWAY" | "DIRT") => void;
   clearLocalMotionPrediction: () => void;
@@ -110,6 +121,8 @@ const initialState = {
   localMotionPrediction: null as LocalMotionPrediction | null,
   question: null as QuestionMessage | null,
   questionReceivedAtMs: 0,
+  lastSubmittedQuestionId: "",
+  lastAppliedQuestionIssuedAtMs: 0,
   decision: null as DecisionPointMessage | null,
   answerFeedback: null as AnswerFeedbackState | null
 };
@@ -151,6 +164,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       localMotionPrediction: null,
       question: null,
       questionReceivedAtMs: 0,
+      lastSubmittedQuestionId: "",
+      lastAppliedQuestionIssuedAtMs: 0,
       decision: null,
       answerFeedback: null
     });
@@ -164,8 +179,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       connection: "connected",
       connectionErrorMessage: "",
       baseSpeedMps: Number.isFinite(message.baseSpeedMps) ? Math.max(0, message.baseSpeedMps) : initialState.baseSpeedMps,
-      roomCreatorPlayerId: message.roomCreatorPlayerId || message.targetPlayerId,
+      roomCreatorPlayerId: typeof message.roomCreatorPlayerId === "string" ? message.roomCreatorPlayerId : message.targetPlayerId,
       roomSettings: normalizeRoomSettings(message.roomId, message.roomSettings, 2),
+      trackTheme: normalizeTrackTheme(message.roomSettings?.mapId ?? get().trackTheme),
       totalLaps: message.totalLaps,
       trackLengthMeters: message.trackLengthMeters,
       selectedCarId: normalizeCarId(message.carId ?? get().selectedCarId)
@@ -216,7 +232,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
           positionMeters: safePosition,
           speedMps: safeSpeed,
           racePhase: safeRacePhase,
-          carId: normalizeCarId(player.carId ?? (player.playerId === state.playerId ? state.selectedCarId : undefined))
+          carId: normalizeCarId(player.carId ?? (player.playerId === state.playerId ? state.selectedCarId : undefined)),
+          ready: Boolean(player.ready),
+          correctAnswers: Math.max(0, Math.trunc(player.correctAnswers ?? 0)),
+          wrongAnswers: Math.max(0, Math.trunc(player.wrongAnswers ?? 0)),
+          timeoutAnswers: Math.max(0, Math.trunc(player.timeoutAnswers ?? 0)),
+          score: Math.trunc(player.score ?? 0),
+          streak: Math.max(0, Math.trunc(player.streak ?? 0)),
+          averageAnswerTimeMs: Math.max(0, Math.trunc(player.averageAnswerTimeMs ?? 0))
         };
         playerSyncMeta[player.playerId] = {
           receivedAtMs,
@@ -307,6 +330,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         winnerPlayerId,
         roomCreatorPlayerId,
         roomSettings,
+        trackTheme: normalizeTrackTheme(roomSettings.mapId ?? state.trackTheme),
         trackLengthMeters,
         question,
         decision
@@ -319,22 +343,57 @@ export const useGameStore = create<GameStore>((set, get) => ({
         state.roomId,
         roomSettings,
         Math.max(2, state.playerIds.length || 0)
-      )
+      ),
+      trackTheme: normalizeTrackTheme(roomSettings.mapId ?? state.trackTheme)
     }));
   },
-  applyQuestion: (message) => {
+  applyQuestion: (message, source = "realtime") => {
     const state = get();
     if (message.targetPlayerId !== state.playerId || state.racePhase !== "active") {
       return;
     }
-    set((currentState) => ({
-      question: message,
-      questionReceivedAtMs: Date.now(),
-      decision: null,
-      localMotionPrediction: currentState.localMotionPrediction?.kind === "decision"
-        ? null
-        : currentState.localMotionPrediction
-    }));
+    const incomingIssuedAtMs = getQuestionIssuedAtMs(message);
+    const currentIssuedAtMs = state.question ? getQuestionIssuedAtMs(state.question) : 0;
+    const isStaleSubmittedQuestion =
+      source !== "submit-answer"
+      && Boolean(state.lastSubmittedQuestionId)
+      && message.questionId === state.lastSubmittedQuestionId;
+    const isOlderThanCurrent =
+      source !== "submit-answer"
+      && Boolean(state.question)
+      && incomingIssuedAtMs > 0
+      && currentIssuedAtMs > 0
+      && incomingIssuedAtMs < currentIssuedAtMs;
+
+    if (isStaleSubmittedQuestion || isOlderThanCurrent) {
+      return;
+    }
+
+    if (import.meta.env.DEV && !hasExpectedQuestionDuration(message)) {
+      console.warn("[question-timer] Unexpected classroom question duration", {
+        questionId: message.questionId,
+        kind: message.kind,
+        routeMode: message.routeMode,
+        timeLimitMs: message.timeLimitMs,
+        timeLimitSeconds: message.timeLimitSeconds
+      });
+    }
+
+    set((currentState) => {
+      const sameQuestion = currentState.question?.questionId === message.questionId;
+      return {
+        question: message,
+        questionReceivedAtMs: sameQuestion ? currentState.questionReceivedAtMs : Date.now(),
+        lastAppliedQuestionIssuedAtMs: Math.max(
+          currentState.lastAppliedQuestionIssuedAtMs,
+          incomingIssuedAtMs
+        ),
+        decision: null,
+        localMotionPrediction: currentState.localMotionPrediction?.kind === "decision"
+          ? null
+          : currentState.localMotionPrediction
+      };
+    });
   },
   applyDecision: (message) => {
     const state = get();
@@ -354,10 +413,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
       answerFeedback: {
         correct: message.correct,
         accepted: message.accepted,
+        resultType: message.resultType,
+        feedback: message.feedback,
+        pointsDelta: message.pointsDelta,
+        progressDelta: message.progressDelta,
+        updatedProgress: message.updatedProgress,
+        streak: message.streak,
+        expectedAnswer: message.expectedAnswer,
+        submittedAnswer: message.submittedAnswer,
         receivedAtMs: Date.now()
       },
       localMotionPrediction: null
     });
+  },
+  markQuestionSubmitted: (questionId) => {
+    set({ lastSubmittedQuestionId: questionId });
   },
   beginLocalAnswerPrediction: (answer) => {
     const state = get();
@@ -427,6 +497,43 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
 function latestTickChanged(nextTick: number, previousTick: number) {
   return Number.isFinite(nextTick) && nextTick !== previousTick;
+}
+
+function getQuestionIssuedAtMs(question: QuestionMessage) {
+  if (typeof question.createdAtMs === "number" && Number.isFinite(question.createdAtMs)) {
+    return question.createdAtMs;
+  }
+  if (
+    typeof question.expiresAtMs === "number"
+    && Number.isFinite(question.expiresAtMs)
+    && typeof question.timeLimitMs === "number"
+    && Number.isFinite(question.timeLimitMs)
+  ) {
+    return question.expiresAtMs - question.timeLimitMs;
+  }
+  return 0;
+}
+
+function hasExpectedQuestionDuration(question: QuestionMessage) {
+  const seconds = typeof question.timeLimitSeconds === "number"
+    ? question.timeLimitSeconds
+    : Math.round(question.timeLimitMs / 1000);
+  if (question.routeMode === "DIRT_ROAD") {
+    return seconds === 30;
+  }
+  if (question.routeMode === "HIGHWAY") {
+    return seconds === 60;
+  }
+  if (!question.routeMode || question.routeMode === "NORMAL") {
+    return seconds === 15;
+  }
+  return true;
+}
+
+function normalizeTrackTheme(value: unknown): TrackTheme {
+  return value === "sunny-forest" || value === "snow-peak" || value === "fun-world" || value === "grand_prix"
+    ? value
+    : "sunny-forest";
 }
 
 function normalizeRacePhase(

@@ -10,10 +10,12 @@ import type {
   GameStateUpdateMessage,
   PlayerSnapshot,
   QuestionMessage,
+  RoomLifecycleStatus,
   RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
 import { getSupabaseTransportConfig } from "./transportConfig";
+import { recordNetworkRequest, startSyncLifecycle, stopSyncLifecycle, updateSyncLifecycle } from "../sync/syncLifecycle";
 
 interface GameErrorMessage {
   code?: string;
@@ -31,6 +33,8 @@ interface GameFunctionResponse {
   error?: GameErrorMessage | null;
 }
 
+type ResponseSource = "join" | "sync" | "submit-answer" | "action";
+
 interface SessionPayload {
   roomId: string;
   playerId: string;
@@ -47,8 +51,28 @@ interface GameRoomStateRecord {
   raceStoppedAtMs: number;
   winnerPlayerId: string | null;
   roomCreatorPlayerId: string | null;
+  trackLengthMeters?: number;
+  endedAtMs?: number;
+  closedAtMs?: number;
+  deletedAtMs?: number;
   roomSettings: RoomSettings;
   players: Record<string, PlayerSnapshot>;
+}
+
+function lifecycleFromRecord(record: GameRoomStateRecord): RoomLifecycleStatus {
+  if (record.deletedAtMs) {
+    return "DELETED";
+  }
+  if (record.closedAtMs) {
+    return "CLOSED";
+  }
+  if (record.endedAtMs || record.raceStopped || record.racePhase === "finish") {
+    return "FINISHED";
+  }
+  if (record.racePhase === "active" || record.racePhase === "starting") {
+    return "RACING";
+  }
+  return "WAITING";
 }
 
 function buildSessionId() {
@@ -62,10 +86,18 @@ export class SupabaseGameClient {
   private client: SupabaseClient | null = null;
   private currentSessionId: string | null = null;
   private currentConnectPayload: ConnectPayload | null = null;
-  private syncIntervalId: number | null = null;
+  private syncTimerId: number | null = null;
+  private syncAbortController: AbortController | null = null;
   private roomChannel: RealtimeChannel | null = null;
   private syncGeneration = 0;
   private syncInFlight = false;
+  private syncFailureCount = 0;
+  private syncLifecycleId: number | null = null;
+  private visibilityListener: (() => void) | null = null;
+  private lastSyncAtMs = 0;
+  private nextSyncAtMs = 0;
+  private lastStopReason = "";
+  private terminalStatusReceived = false;
 
   async connect(payload: ConnectPayload) {
     await this.disconnect();
@@ -79,6 +111,8 @@ export class SupabaseGameClient {
 
     this.currentSessionId = buildSessionId();
     this.currentConnectPayload = normalizedPayload;
+    this.terminalStatusReceived = false;
+    this.lastStopReason = "";
     useGameStore.getState().setConnection("connecting");
 
     try {
@@ -86,7 +120,7 @@ export class SupabaseGameClient {
         ...normalizedPayload,
         sessionId: this.currentSessionId
       });
-      if (!this.applyResponse(response)) {
+      if (!this.applyResponse(response, "join")) {
         this.currentSessionId = null;
         this.currentConnectPayload = null;
         return;
@@ -120,20 +154,22 @@ export class SupabaseGameClient {
     }
   }
 
-  async submitAnswer(answer: string) {
+  async submitAnswer(answer: string, timeout = false) {
     const sessionPayload = this.getSessionPayload();
     const question = useGameStore.getState().question;
     if (!sessionPayload || !question) {
       return;
     }
 
+    useGameStore.getState().markQuestionSubmitted(question.questionId);
     try {
       const response = await this.invoke("submit-answer", {
         ...sessionPayload,
         questionId: question.questionId,
-        answer
+        answer,
+        timeout
       });
-      this.applyResponse(response);
+      this.applyResponse(response, "submit-answer");
     } catch (error) {
       console.warn("[supabase] submit-answer failed", error);
       useGameStore.getState().setConnection("error");
@@ -153,7 +189,7 @@ export class SupabaseGameClient {
         eventId: decision.eventId,
         choice
       });
-      this.applyResponse(response);
+      this.applyResponse(response, "action");
     } catch (error) {
       console.warn("[supabase] submit-decision failed", error);
       useGameStore.getState().setConnection("error");
@@ -168,7 +204,7 @@ export class SupabaseGameClient {
 
     try {
       const response = await this.invoke("start-race", sessionPayload);
-      this.applyResponse(response);
+      this.applyResponse(response, "action");
     } catch (error) {
       console.warn("[supabase] start-race failed", error);
       useGameStore.getState().setConnection("error");
@@ -187,9 +223,27 @@ export class SupabaseGameClient {
         ...sessionPayload,
         roomSettings
       });
-      this.applyResponse(response);
+      this.applyResponse(response, "action");
     } catch (error) {
       console.warn("[supabase] update-room-settings failed", error);
+      useGameStore.getState().setConnection("error");
+    }
+  }
+
+  async setReady(ready: boolean) {
+    const sessionPayload = this.getSessionPayload();
+    if (!sessionPayload) {
+      return;
+    }
+
+    try {
+      const response = await this.invoke("set-ready", {
+        ...sessionPayload,
+        ready
+      });
+      this.applyResponse(response, "action");
+    } catch (error) {
+      console.warn("[supabase] set-ready failed", error);
       useGameStore.getState().setConnection("error");
     }
   }
@@ -202,7 +256,7 @@ export class SupabaseGameClient {
 
     try {
       const response = await this.invoke("return-to-lobby", sessionPayload);
-      this.applyResponse(response);
+      this.applyResponse(response, "action");
     } catch (error) {
       console.warn("[supabase] return-to-lobby failed", error);
       useGameStore.getState().setConnection("error");
@@ -210,19 +264,80 @@ export class SupabaseGameClient {
   }
 
   private startSyncLoop() {
-    this.stopSyncLoop();
+    this.stopSyncLoop("restart");
     const generation = ++this.syncGeneration;
-    this.syncIntervalId = window.setInterval(() => {
-      void this.sync(generation);
-    }, 250);
+    const roomId = this.currentConnectPayload?.roomId ?? "";
+    this.syncLifecycleId = startSyncLifecycle({
+      key: `student:${roomId}`,
+      role: "student",
+      mode: "classroom",
+      adapter: "supabase",
+      roomId,
+      roomCode: roomId,
+      intervalMs: this.getSyncIntervalMs()
+    });
+    this.visibilityListener = () => {
+      if (document.visibilityState === "visible") {
+        this.scheduleSync(generation, 0);
+      }
+    };
+    document.addEventListener("visibilitychange", this.visibilityListener);
+    this.scheduleSync(generation, this.getSyncIntervalMs());
   }
 
-  private stopSyncLoop() {
+  private stopSyncLoop(reason = "stopped") {
     this.syncGeneration += 1;
-    if (this.syncIntervalId !== null) {
-      window.clearInterval(this.syncIntervalId);
-      this.syncIntervalId = null;
+    if (this.syncTimerId !== null) {
+      window.clearTimeout(this.syncTimerId);
+      this.syncTimerId = null;
     }
+    if (this.syncAbortController) {
+      this.syncAbortController.abort();
+      this.syncAbortController = null;
+    }
+    if (this.visibilityListener) {
+      document.removeEventListener("visibilitychange", this.visibilityListener);
+      this.visibilityListener = null;
+    }
+    stopSyncLifecycle(this.syncLifecycleId, reason);
+    this.syncLifecycleId = null;
+    this.syncInFlight = false;
+    this.syncFailureCount = 0;
+    this.lastStopReason = reason;
+    this.nextSyncAtMs = 0;
+  }
+
+  private scheduleSync(generation: number, delayMs: number) {
+    if (generation !== this.syncGeneration || !this.getSessionPayload()) {
+      return;
+    }
+    if (this.syncTimerId !== null) {
+      window.clearTimeout(this.syncTimerId);
+    }
+    this.nextSyncAtMs = Date.now() + delayMs;
+    updateSyncLifecycle(this.syncLifecycleId ?? 0, { nextSyncAtMs: this.nextSyncAtMs, intervalMs: delayMs });
+    this.syncTimerId = window.setTimeout(() => {
+      this.syncTimerId = null;
+      void this.sync(generation);
+    }, delayMs);
+  }
+
+  private getSyncIntervalMs() {
+    const state = useGameStore.getState();
+    if (document.visibilityState === "hidden") {
+      return 10000;
+    }
+    if (state.racePhase === "active") {
+      return 2000;
+    }
+    if (state.racePhase === "starting") {
+      return 1000;
+    }
+    return 5000;
+  }
+
+  private shouldStopForLifecycle(status: RoomLifecycleStatus | undefined) {
+    return status === "CLOSED" || status === "DELETED";
   }
 
   private subscribeToRoomChanges(roomId: string) {
@@ -269,20 +384,69 @@ export class SupabaseGameClient {
     }
 
     this.syncInFlight = true;
+    this.syncAbortController = new AbortController();
     try {
-      const response = await this.invoke("sync-room", sessionPayload);
+      recordNetworkRequest("sync-room", "student");
+      const response = await this.invoke("sync-room", sessionPayload, this.syncAbortController.signal);
       if (generation !== this.syncGeneration) {
         return;
       }
-      this.applyResponse(response);
+      this.lastSyncAtMs = Date.now();
+      this.syncFailureCount = 0;
+      updateSyncLifecycle(this.syncLifecycleId ?? 0, {
+        lastSyncAtMs: Date.now(),
+        lastStatus: response.stateUpdate?.lifecycleStatus ?? response.error?.code ?? "OK"
+      });
+      const keepRunning = this.applyResponse(response, "sync");
+      if (!keepRunning || this.shouldStopForLifecycle(response.stateUpdate?.lifecycleStatus) || this.isLocalParticipantMissing(response.stateUpdate)) {
+        this.terminalStatusReceived = !keepRunning || this.shouldStopForLifecycle(response.stateUpdate?.lifecycleStatus);
+        this.stopSyncLoop(response.error?.code ?? response.stateUpdate?.lifecycleStatus ?? "terminal");
+        if (this.isLocalParticipantMissing(response.stateUpdate)) {
+          useGameStore.getState().resetSession();
+          useGameStore.getState().setConnection("error", "You were removed from the room by the teacher.");
+        }
+        return;
+      }
     } catch (error) {
       if (generation === this.syncGeneration) {
-        console.warn("[supabase] sync-room failed", error);
-        useGameStore.getState().setConnection("error");
+        if ((error as Error).name !== "AbortError") {
+          this.syncFailureCount += 1;
+          console.warn("[supabase] sync-room failed", error);
+          if (this.syncFailureCount >= 5) {
+            useGameStore.getState().setConnection("error", "Room sync failed repeatedly. Please rejoin.");
+            this.stopSyncLoop("sync-failure-threshold");
+            return;
+          }
+        }
       }
     } finally {
+      this.syncAbortController = null;
       this.syncInFlight = false;
+      if (generation === this.syncGeneration) {
+        const baseIntervalMs = this.getSyncIntervalMs();
+        const backoffMs = Math.min(15000, baseIntervalMs * Math.max(1, this.syncFailureCount + 1));
+        if (import.meta.env.DEV) {
+          const state = useGameStore.getState();
+          if ((state.racePhase === "lobby" || state.racePhase === "starting") && state.racePhase !== "starting" && backoffMs < 4000) {
+            console.warn("BUG: student waiting polling interval too aggressive", {
+              intervalMs: backoffMs,
+              roomId: state.roomId,
+              playerId: state.playerId
+            });
+          }
+        }
+        updateSyncLifecycle(this.syncLifecycleId ?? 0, { intervalMs: backoffMs });
+        this.scheduleSync(generation, backoffMs);
+      }
     }
+  }
+
+  private isLocalParticipantMissing(stateUpdate: GameStateUpdateMessage | undefined) {
+    const playerId = this.currentConnectPayload?.playerId;
+    if (!stateUpdate || !playerId || this.shouldStopForLifecycle(stateUpdate.lifecycleStatus)) {
+      return false;
+    }
+    return !stateUpdate.players.some((player) => player.playerId === playerId);
   }
 
   private stateRecordToUpdate(record: GameRoomStateRecord | null | undefined): GameStateUpdateMessage | null {
@@ -305,11 +469,23 @@ export class SupabaseGameClient {
         speedMps: player.speedMps,
         lap: player.lap,
         finished: player.finished,
-        racePhase: player.racePhase
+        racePhase: player.racePhase,
+        carId: normalizeCarId(player.carId),
+        ready: Boolean(player.ready),
+        correctAnswers: Math.max(0, Math.trunc(player.correctAnswers ?? 0)),
+        wrongAnswers: Math.max(0, Math.trunc(player.wrongAnswers ?? 0)),
+        timeoutAnswers: Math.max(0, Math.trunc(player.timeoutAnswers ?? 0)),
+        score: Math.max(0, Math.trunc(player.score ?? player.positionMeters ?? 0)),
+        streak: Math.max(0, Math.trunc(player.streak ?? 0)),
+        averageAnswerTimeMs: Math.max(0, Math.trunc(player.averageAnswerTimeMs ?? 0)),
+        connected: player.connected !== false,
+        disconnectedAtMs: Math.max(0, Math.trunc(player.disconnectedAtMs ?? 0)),
+        routeMode: player.routeMode
       }));
 
     return {
       roomId: record.roomId,
+      lifecycleStatus: lifecycleFromRecord(record),
       serverTimeMs: Date.now(),
       tick: Number.isFinite(record.tick) ? record.tick : state.latestTick,
       racePhase: record.racePhase ?? state.roomRacePhase,
@@ -320,6 +496,7 @@ export class SupabaseGameClient {
       winnerPlayerId: record.winnerPlayerId ?? "",
       roomCreatorPlayerId: record.roomCreatorPlayerId ?? "",
       roomSettings: record.roomSettings ?? state.roomSettings,
+      trackLengthMeters: Number.isFinite(record.trackLengthMeters) ? Math.max(1, record.trackLengthMeters ?? state.trackLengthMeters) : state.trackLengthMeters,
       players
     };
   }
@@ -355,22 +532,48 @@ export class SupabaseGameClient {
     };
   }
 
-  private async invoke(functionName: string, payload: object) {
-    const { data, error } = await this.getClient().functions.invoke(functionName, {
-      body: payload as Record<string, unknown>
+  private async invoke(functionName: string, payload: object, signal?: AbortSignal) {
+    const config = getSupabaseTransportConfig();
+    if (!config) {
+      throw new Error("Supabase transport is not configured.");
+    }
+    const response = await fetch(`${config.url}/functions/v1/${functionName}`, {
+      method: "POST",
+      headers: {
+        apikey: config.anonKey,
+        Authorization: `Bearer ${config.anonKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload),
+      signal
     });
-    if (error) {
-      throw error;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((data as GameFunctionResponse).error?.message ?? `Supabase function failed: ${functionName}`);
     }
     return (data ?? {}) as GameFunctionResponse;
   }
 
-  private applyResponse(response: GameFunctionResponse) {
+  private applyResponse(response: GameFunctionResponse, source: ResponseSource = "action") {
     if (response.error) {
       const code = response.error.code ?? "UNKNOWN";
       const detail = response.error.message?.trim() || "Supabase backend rejected the request.";
       console.warn(`[supabase.error] ${code}: ${detail}`);
-      useGameStore.getState().setConnection("error", detail);
+      const store = useGameStore.getState();
+      if (
+        code === "ROOM_DELETED"
+        || code === "ROOM_CLOSED"
+        || code === "ROOM_FINISHED"
+        || code === "PLAYER_REMOVED"
+        || code === "PLAYER_KICKED"
+        || code === "SESSION_NOT_AUTHORIZED"
+      ) {
+        this.terminalStatusReceived = true;
+        this.stopSyncLoop(code);
+        store.resetSession();
+      } else {
+        store.setConnection("error", detail);
+      }
       return false;
     }
 
@@ -385,8 +588,8 @@ export class SupabaseGameClient {
 
     if ("question" in response) {
       if (response.question) {
-        store.applyQuestion(response.question);
-      } else {
+        store.applyQuestion(response.question, source === "submit-answer" ? "submit-answer" : "sync");
+      } else if (source !== "sync") {
         store.clearQuestion();
       }
     }
@@ -394,7 +597,7 @@ export class SupabaseGameClient {
     if ("decision" in response) {
       if (response.decision) {
         store.applyDecision(response.decision);
-      } else {
+      } else if (source !== "sync") {
         store.clearDecision();
       }
     }
@@ -404,5 +607,21 @@ export class SupabaseGameClient {
     }
 
     return true;
+  }
+
+  getDebugState() {
+    const state = useGameStore.getState();
+    return {
+      studentSyncActive: this.syncLifecycleId !== null,
+      currentSyncIntervalMs: this.getSyncIntervalMs(),
+      lastSyncAtMs: this.lastSyncAtMs,
+      nextSyncAtMs: this.nextSyncAtMs,
+      lastStopReason: this.lastStopReason,
+      terminalStatusReceived: this.terminalStatusReceived,
+      roomId: state.roomId,
+      roomStatus: state.roomRacePhase,
+      participantId: state.playerId,
+      participantStatus: state.playerId ? (state.players[state.playerId]?.racePhase ?? "missing") : "none"
+    };
   }
 }

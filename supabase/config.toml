@@ -425,3 +425,45 @@ verify_jwt = false
 
 [functions.update-room-settings]
 verify_jwt = false
+
+[functions.set-ready]
+verify_jwt = false
+
+[functions.teacher-create-room]
+verify_jwt = false
+
+[functions.teacher-sync-room]
+verify_jwt = false
+
+[functions.teacher-room-events]
+verify_jwt = false
+
+[functions.teacher-start-race]
+verify_jwt = false
+
+[functions.teacher-update-room-settings]
+verify_jwt = false
+
+[functions.teacher-remove-player]
+verify_jwt = false
+
+[functions.teacher-approve-player]
+verify_jwt = false
+
+[functions.teacher-return-to-lobby]
+verify_jwt = false
+
+[functions.teacher-end-room]
+verify_jwt = false
+
+[functions.teacher-close-room]
+verify_jwt = false
+
+[functions.teacher-delete-room]
+verify_jwt = false
+
+[functions.list-teacher-rooms]
+verify_jwt = false
+
+[functions.list-active-classroom-rooms]
+verify_jwt = false

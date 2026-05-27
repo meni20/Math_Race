@@ -6,6 +6,9 @@ const MIN_RACE_DURATION_SECONDS = 60;
 const MAX_RACE_DURATION_SECONDS = 600;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
 const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
+const DEFAULT_TARGET_SCORE = 500;
+const MIN_TARGET_SCORE = 100;
+const MAX_TARGET_SCORE = 5000;
 
 function clampInteger(value: number, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) {
@@ -27,7 +30,10 @@ export function buildDefaultRoomSettings(roomId: string): RoomSettings {
     raceName: buildDefaultRaceName(roomId),
     maxPlayers: MAX_ROOM_PLAYERS,
     raceDurationSeconds: 180,
-    questionTimeLimitSeconds: 8
+    questionTimeLimitSeconds: 15,
+    targetScore: DEFAULT_TARGET_SCORE,
+    operations: "MIXED",
+    mapId: "sunny-forest"
   };
 }
 
@@ -56,7 +62,19 @@ export function normalizeRoomSettings(
       defaults.questionTimeLimitSeconds,
       MIN_QUESTION_TIME_LIMIT_SECONDS,
       MAX_QUESTION_TIME_LIMIT_SECONDS
-    )
+    ),
+    targetScore: clampInteger(
+      settings?.targetScore ?? defaults.targetScore,
+      defaults.targetScore,
+      MIN_TARGET_SCORE,
+      MAX_TARGET_SCORE
+    ),
+    classGroup: typeof settings?.classGroup === "string" ? settings.classGroup.trim().slice(0, 80) : defaults.classGroup,
+    difficulty: settings?.difficulty === "EASY" || settings?.difficulty === "MEDIUM" || settings?.difficulty === "HARD"
+      ? settings.difficulty
+      : defaults.difficulty,
+    mapId: settings?.mapId ?? defaults.mapId,
+    operations: "MIXED"
   };
 }
 
@@ -66,6 +84,10 @@ export function areRoomSettingsEqual(left: RoomSettings, right: RoomSettings) {
     && left.maxPlayers === right.maxPlayers
     && left.raceDurationSeconds === right.raceDurationSeconds
     && left.questionTimeLimitSeconds === right.questionTimeLimitSeconds
+    && left.targetScore === right.targetScore
+    && left.mapId === right.mapId
+    && left.difficulty === right.difficulty
+    && left.classGroup === right.classGroup
   );
 }
 

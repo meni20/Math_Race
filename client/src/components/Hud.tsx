@@ -86,9 +86,13 @@ export function Hud() {
   const raceFinishedAtMs = useGameStore((state) => state.raceFinishedAtMs);
   const roomSettings = useGameStore((state) => state.roomSettings);
   const selectedCarId = useGameStore((state) => state.selectedCarId);
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
   const { nowMs, playerIds, players, localPlayer } = useRenderedPlayers();
   const localCar = getCarMetadata(localPlayer?.carId ?? selectedCarId);
   const localSpeedKmh = localPlayer ? toKmh(localPlayer.speedMps) : 0;
+  const localScore = Math.max(0, Math.trunc(localPlayer?.score ?? 0));
+  const targetScore = Math.max(1, Math.trunc(roomSettings.targetScore ?? trackLengthMeters));
 
   const displayedLap = localPlayer
     ? Math.min(totalLaps, localPlayer.finished ? totalLaps : localPlayer.lap + 1)
@@ -109,6 +113,10 @@ export function Hud() {
         if (racePhase === "lobby" || racePhase === "starting") {
           return a.laneIndex - b.laneIndex;
         }
+        const scoreDelta = Math.max(0, Math.trunc(b.score ?? 0)) - Math.max(0, Math.trunc(a.score ?? 0));
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
         return (
           getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
           - getPlayerRaceDistanceMeters(a, trackLengthMeters, totalLaps)
@@ -120,80 +128,96 @@ export function Hud() {
   if (connection !== "connected" || !roomId || racePhase !== "active") {
     return null;
   }
+  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   return (
     <>
-      <section className="pointer-events-none absolute left-5 top-5 z-20 w-[min(82vw,17rem)] rounded-2xl border border-white/12 bg-slate-950/58 p-3 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/80">Players: {playerIds.length}/{roomSettings.maxPlayers}</p>
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-200">
-            {racePhase}
-          </span>
-        </div>
-        <ul className="space-y-1.5 text-sm">
-          {standings.map((player, index) => (
-            <li
-              key={player.playerId}
-              className={`flex items-center justify-between gap-3 rounded-xl border px-2.5 py-2 ${
-                player.playerId === playerId
-                  ? "border-cyan-100/25 bg-cyan-100/12 text-cyan-50"
-                  : "border-white/8 bg-white/5 text-slate-100"
-              }`}
-            >
-              <span className="min-w-0 truncate font-semibold">
-                {index + 1}. {player.playerId === playerId ? "You" : player.displayName}
+      {!isClassroomSession ? (
+        <>
+          <section className="pointer-events-none absolute left-5 top-5 z-20 w-[min(82vw,17rem)] rounded-2xl border border-white/12 bg-slate-950/58 p-3 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/80">Players: {playerIds.length}/{roomSettings.maxPlayers}</p>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-200">
+                {racePhase}
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-300">
-                L{Math.min(totalLaps, player.finished ? totalLaps : player.lap + 1)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+            </div>
+            <ul className="space-y-1.5 text-sm">
+              {standings.map((player, index) => (
+                <li
+                  key={player.playerId}
+                  className={`flex items-center justify-between gap-3 rounded-xl border px-2.5 py-2 ${
+                    player.playerId === playerId
+                      ? "border-cyan-100/25 bg-cyan-100/12 text-cyan-50"
+                      : "border-white/8 bg-white/5 text-slate-100"
+                  }`}
+                >
+                  <span className="min-w-0 truncate font-semibold">
+                    {index + 1}. {player.playerId === playerId ? "You" : player.displayName}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-300">
+                    {Math.max(0, Math.trunc(player.score ?? 0))} pts
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
 
-      <section className="pointer-events-auto absolute right-5 top-5 z-20 flex max-w-[min(90vw,24rem)] items-center gap-3 rounded-full border border-white/12 bg-slate-950/58 py-2 pl-3 pr-4 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
-        <div
-          className="flex h-12 w-12 items-center justify-center rounded-full border text-base font-black uppercase text-slate-50"
-          style={{
-            borderColor: `${localCar.accentColor}88`,
-            background: `${localCar.accentColor}22`,
-            boxShadow: `0 0 24px ${localCar.accentColor}33`
-          }}
-        >
-          {(localPlayer?.displayName || "N").slice(0, 1)}
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-bold uppercase tracking-[0.14em] text-slate-100">Room: {roomId}</p>
-          <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: localCar.accentColor }}>
-            Car: {localCar.name}
-          </p>
-        </div>
-      </section>
+          <section className="pointer-events-auto absolute right-5 top-5 z-20 flex max-w-[min(90vw,24rem)] items-center gap-3 rounded-full border border-white/12 bg-slate-950/58 py-2 pl-3 pr-4 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
+            <div
+              className="flex h-12 w-12 items-center justify-center rounded-full border text-base font-black uppercase text-slate-50"
+              style={{
+                borderColor: `${localCar.accentColor}88`,
+                background: `${localCar.accentColor}22`,
+                boxShadow: `0 0 24px ${localCar.accentColor}33`
+              }}
+            >
+              {(localPlayer?.displayName || "N").slice(0, 1)}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold uppercase tracking-[0.14em] text-slate-100">Room: {roomId}</p>
+              <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: localCar.accentColor }}>
+                Car: {localCar.name}
+              </p>
+              <p className="mt-0.5 truncate text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-100/85">
+                Score: {localScore} / {targetScore}
+              </p>
+            </div>
+          </section>
+        </>
+      ) : null}
 
       <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} />
 
       <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
-        <p className="font-semibold text-slate-50">Lap {displayedLap}/{totalLaps}</p>
-        <p className="mt-1 text-amber-100/90">
-          {localPlayer?.finished
-            ? "Finish gate crossed"
-            : finalLapActive
-              ? `Finish: ${formatDistance(distanceToFinishGateMeters)}`
-              : `Opens in ${lapsRemainingToFinish} lap${lapsRemainingToFinish === 1 ? "" : "s"}`}
-        </p>
+        <p className="font-semibold text-slate-50">Score {localScore}/{targetScore}</p>
+        {sessionMode === "solo" ? (
+          <p className="mt-1 text-amber-100/90">{localPlayer?.finished ? "Target reached" : `${Math.max(0, targetScore - localScore)} pts to finish`}</p>
+        ) : (
+          <p className="mt-1 text-amber-100/90">
+            {localPlayer?.finished
+              ? "Finish gate crossed"
+              : finalLapActive
+                ? `Finish: ${formatDistance(distanceToFinishGateMeters)}`
+                : `Opens in ${lapsRemainingToFinish} lap${lapsRemainingToFinish === 1 ? "" : "s"}`}
+          </p>
+        )}
         <p className="mt-1 text-cyan-100/80">Race {formatClock(raceElapsedMs)}</p>
       </section>
 
       {feedback && nowMs - feedback.receivedAtMs < 1200 ? (
         <section
           className={`pointer-events-none absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-[0_14px_34px_rgba(2,8,23,0.3)] ${
-            feedback.correct
+            feedback.resultType === "TIMEOUT" || feedback.feedback === "timeout"
+              ? "border-amber-300/50 bg-amber-400/25 text-amber-100"
+              : feedback.correct
               ? "border-emerald-300/50 bg-emerald-400/25 text-emerald-100"
               : "border-rose-300/50 bg-rose-500/25 text-rose-100"
           }`}
         >
           {feedback.accepted
-            ? feedback.correct
+            ? feedback.resultType === "TIMEOUT" || feedback.feedback === "timeout"
+              ? "Time's up"
+              : feedback.correct
               ? "Correct answer: BOOST engaged"
               : "Wrong answer: speed penalty"
             : "Answer missed timing window, new question issued"}

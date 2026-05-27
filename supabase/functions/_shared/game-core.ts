@@ -20,12 +20,35 @@ import type {
   RaceHistoryRow,
   RacePhase,
   RoomSettings,
+  SetReadyRequest,
   RoomJoinedMessage,
+  RoomLifecycleStatus,
+  TeacherCreateRoomRequest,
+  TeacherRemovePlayerRequest,
+  TeacherRoomRequest,
+  TeacherUpdateRoomSettingsRequest,
   UpdateRoomSettingsRequest,
   RoomMutationResult
 } from "./contracts.ts";
 import { normalizeDisplayName } from "./input.ts";
-import { generateQuestion } from "./question-generator.ts";
+import { validateAnswer } from "./questions/answerValidator.ts";
+import { scoreAnswer } from "./questions/scoringEngine.ts";
+import {
+  advanceQuestionStateAfterAnswer,
+  chooseRoute,
+  createInitialPlayerQuestionState,
+  createRouteChoicePrompt,
+  ensureNextPrompt,
+  hasAnsweredQuestion,
+  normalizePlayerQuestionState
+} from "./questions/questionStateMachine.ts";
+import type {
+  Difficulty,
+  PlayerQuestionState,
+  QuestionResultType,
+  RaceQuestionPrivate,
+  RouteMode
+} from "./questions/questionTypes.ts";
 
 const BASE_SPEED_MPS = 42;
 const MIN_SPEED_MPS = 18;
@@ -62,6 +85,9 @@ const MAX_RACE_DURATION_SECONDS = 600;
 const DEFAULT_QUESTION_TIME_LIMIT_SECONDS = 8;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
 const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
+const DEFAULT_TARGET_SCORE = 500;
+const MIN_TARGET_SCORE = 100;
+const MAX_TARGET_SCORE = 5000;
 
 type PresenceByPlayerId = Record<string, GameRoomPresenceRecord>;
 
@@ -96,7 +122,10 @@ function buildDefaultRoomSettings(roomId: string): RoomSettings {
     raceName: buildDefaultRaceName(roomId),
     maxPlayers: DEFAULT_MAX_PLAYERS,
     raceDurationSeconds: DEFAULT_RACE_DURATION_SECONDS,
-    questionTimeLimitSeconds: DEFAULT_QUESTION_TIME_LIMIT_SECONDS
+    questionTimeLimitSeconds: 15,
+    targetScore: DEFAULT_TARGET_SCORE,
+    operations: "MIXED",
+    mapId: "sunny-forest"
   };
 }
 
@@ -113,12 +142,7 @@ function normalizeRoomSettings(
 
   return {
     raceName,
-    maxPlayers: clampInteger(
-      Number(roomSettings?.maxPlayers ?? defaults.maxPlayers),
-      defaults.maxPlayers,
-      safeMinimumPlayers,
-      MAX_MAX_PLAYERS
-    ),
+    maxPlayers: MAX_MAX_PLAYERS,
     raceDurationSeconds: clampInteger(
       Number(roomSettings?.raceDurationSeconds ?? defaults.raceDurationSeconds),
       defaults.raceDurationSeconds,
@@ -130,7 +154,19 @@ function normalizeRoomSettings(
       defaults.questionTimeLimitSeconds,
       MIN_QUESTION_TIME_LIMIT_SECONDS,
       MAX_QUESTION_TIME_LIMIT_SECONDS
-    )
+    ),
+    targetScore: clampInteger(
+      Number(roomSettings?.targetScore ?? defaults.targetScore),
+      defaults.targetScore,
+      MIN_TARGET_SCORE,
+      MAX_TARGET_SCORE
+    ),
+    classGroup: typeof roomSettings?.classGroup === "string" ? roomSettings.classGroup.trim().slice(0, 80) : defaults.classGroup,
+    difficulty: roomSettings?.difficulty === "EASY" || roomSettings?.difficulty === "MEDIUM" || roomSettings?.difficulty === "HARD"
+      ? roomSettings.difficulty
+      : defaults.difficulty,
+    mapId: typeof roomSettings?.mapId === "string" ? roomSettings.mapId : defaults.mapId,
+    operations: "MIXED"
   };
 }
 
@@ -162,6 +198,22 @@ function sortedPlayers(room: GameRoomStateRecord) {
 
 function isRaceActive(phase: RacePhase) {
   return phase === "active";
+}
+
+function roomLifecycleStatus(room: GameRoomStateRecord): RoomLifecycleStatus {
+  if (room.deletedAtMs) {
+    return "DELETED";
+  }
+  if (room.closedAtMs) {
+    return "CLOSED";
+  }
+  if (room.endedAtMs || room.raceStopped || room.racePhase === "finish") {
+    return "FINISHED";
+  }
+  if (room.racePhase === "starting" || room.racePhase === "active") {
+    return "RACING";
+  }
+  return "WAITING";
 }
 
 function normalizeStoredPlayerRacePhase(player: PlayerStateRecord, room: GameRoomStateRecord): RacePhase {
@@ -213,7 +265,7 @@ function hydrateRoomSetup(room: GameRoomStateRecord) {
     Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS)
   );
 
-  room.roomCreatorPlayerId = pickRoomHost(room);
+  room.roomCreatorPlayerId = room.teacherSessionId ? null : pickRoomHost(room);
 
   return previousCreatorPlayerId !== room.roomCreatorPlayerId
     || !areRoomSettingsEqual(previousRoomSettings, room.roomSettings);
@@ -242,7 +294,11 @@ function areRoomSettingsEqual(left: RoomSettings | null | undefined, right: Room
   return left.raceName === right.raceName
     && left.maxPlayers === right.maxPlayers
     && left.raceDurationSeconds === right.raceDurationSeconds
-    && left.questionTimeLimitSeconds === right.questionTimeLimitSeconds;
+    && left.questionTimeLimitSeconds === right.questionTimeLimitSeconds
+    && left.targetScore === right.targetScore
+    && left.mapId === right.mapId
+    && left.difficulty === right.difficulty
+    && left.classGroup === right.classGroup;
 }
 
 function isFreshPresence(presence: GameRoomPresenceRecord | null | undefined, now: number) {
@@ -290,10 +346,19 @@ function isFreshSession(session: PlayerSessionRecord | null, now: number) {
   return Boolean(session && (now - session.lastSeenAtMs) <= STALE_SESSION_MS);
 }
 
-function createPlayerState(playerId: string, displayName: string, laneIndex: number, joinedAtMs: number): PlayerStateRecord {
+function normalizeCarId(carId: string | null | undefined) {
+  const normalized = String(carId ?? "")
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, "-")
+    .slice(0, 64);
+  return normalized || undefined;
+}
+
+function createPlayerState(playerId: string, displayName: string, laneIndex: number, joinedAtMs: number, carId?: string): PlayerStateRecord {
   return {
     playerId,
     displayName,
+    carId: normalizeCarId(carId),
     joinedAtMs,
     laneIndex,
     positionMeters: 0,
@@ -304,11 +369,21 @@ function createPlayerState(playerId: string, displayName: string, laneIndex: num
     lap: 0,
     finished: false,
     correctStreak: 0,
+    correctAnswers: 0,
+    wrongAnswers: 0,
+    timeoutAnswers: 0,
+    score: 0,
+    totalAnswerTimeMs: 0,
+    answerCount: 0,
     pendingQuestion: null,
     pendingDecisionPoint: null,
+    questionState: createInitialPlayerQuestionState(),
     decisionCooldownUntilMs: 0,
     highwayChallengeActive: false,
     racePhase: "lobby",
+    ready: false,
+    connected: true,
+    disconnectedAtMs: 0,
     session: null
   };
 }
@@ -334,6 +409,19 @@ export function createRoomState(
     lastInteractionAtMs: now,
     winnerPlayerId: null,
     roomCreatorPlayerId: null,
+    teacherSessionId: null,
+    teacherLastSeenAtMs: 0,
+    requiresApproval: false,
+    difficulty: "MEDIUM",
+    mapId: "sunny-forest",
+    questionTypes: ["MIXED"],
+    targetScore: DEFAULT_TARGET_SCORE,
+    isLocked: false,
+    isListed: true,
+    allowMidGameJoin: true,
+    endedAtMs: 0,
+    closedAtMs: 0,
+    deletedAtMs: 0,
     roomSettings: buildDefaultRoomSettings(roomId),
     resultHistoryId: null,
     players: {}
@@ -349,38 +437,63 @@ function errorResponse(code: string, message: string, roomId?: string, playerId?
   };
 }
 
-function createPendingQuestion(
-  room: GameRoomStateRecord,
-  difficulty: number,
-  highwayChallenge: boolean,
-  now: number
-): PendingQuestionRecord {
-  const baseQuestion = generateQuestion(difficulty);
-  const timeLimitMs = Math.max(
-    MIN_QUESTION_TIME_LIMIT_SECONDS * 1000,
-    room.roomSettings.questionTimeLimitSeconds * 1000
-  );
-  const question = {
-    ...baseQuestion,
-    timeLimitMs
-  };
+function difficultyToNumber(difficulty: RaceQuestionPrivate["difficulty"]) {
+  return difficulty === "HARD" ? 3 : difficulty === "MEDIUM" ? 2 : 1;
+}
+
+function getRoomQuestionDifficulty(room: GameRoomStateRecord): Difficulty {
+  const difficulty = room.roomSettings?.difficulty ?? room.difficulty;
+  return difficulty === "EASY" || difficulty === "MEDIUM" || difficulty === "HARD" ? difficulty : "MEDIUM";
+}
+
+function getPlayerQuestionState(player: PlayerStateRecord): PlayerQuestionState {
+  const fallback = createInitialPlayerQuestionState();
+  fallback.streak = Math.max(0, Math.trunc(player.correctStreak ?? 0));
+  return normalizePlayerQuestionState(player.questionState ?? fallback);
+}
+
+function setPlayerQuestionState(player: PlayerStateRecord, state: PlayerQuestionState) {
+  player.questionState = normalizePlayerQuestionState(state);
+  player.correctStreak = player.questionState.streak;
+}
+
+function syncPendingQuestionFromState(player: PlayerStateRecord) {
+  const question = player.questionState?.currentQuestion;
+  player.pendingQuestion = question
+    ? {
+      question,
+      expiresAtMs: question.expiresAtMs,
+      fromHighwayChallenge: question.routeMode === "HIGHWAY"
+    }
+    : null;
+}
+
+function createPendingQuestionFromEngine(question: RaceQuestionPrivate): PendingQuestionRecord {
   return {
     question,
-    expiresAtMs: now + question.timeLimitMs,
-    fromHighwayChallenge: highwayChallenge
+    expiresAtMs: question.expiresAtMs,
+    fromHighwayChallenge: question.routeMode === "HIGHWAY"
   };
 }
 
 function toQuestionMessage(roomId: string, player: PlayerStateRecord, pending: PendingQuestionRecord): QuestionMessage {
+  const question = pending.question;
   return {
     roomId,
     targetPlayerId: player.playerId,
-    questionId: pending.question.questionId,
-    prompt: pending.question.prompt,
-    difficulty: pending.question.difficulty,
-    timeLimitMs: pending.question.timeLimitMs,
-    expiresAtMs: pending.expiresAtMs,
-    highwayChallenge: pending.fromHighwayChallenge
+    questionId: question.id,
+    id: question.id,
+    kind: question.kind,
+    routeMode: question.routeMode,
+    operation: question.operation,
+    prompt: question.prompt,
+    difficulty: difficultyToNumber(question.difficulty),
+    difficultyLabel: question.difficulty,
+    timeLimitMs: question.timeLimitSeconds * 1000,
+    timeLimitSeconds: question.timeLimitSeconds,
+    createdAtMs: question.createdAtMs,
+    expiresAtMs: question.expiresAtMs,
+    highwayChallenge: question.routeMode === "HIGHWAY"
   };
 }
 
@@ -425,8 +538,20 @@ function currentPrompt(room: GameRoomStateRecord, player: PlayerStateRecord, now
   };
 }
 
-function issueNewQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, difficulty: number, highwayChallenge: boolean, now: number) {
-  player.pendingQuestion = createPendingQuestion(room, difficulty, highwayChallenge, now);
+function issueNewQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, _difficulty: number, _highwayChallenge: boolean, now: number) {
+  const result = ensureNextPrompt(getPlayerQuestionState(player), now, getRoomQuestionDifficulty(room));
+  setPlayerQuestionState(player, result.state);
+  syncPendingQuestionFromState(player);
+  if (result.routeChoice) {
+    player.pendingDecisionPoint = {
+      eventId: result.routeChoice.id,
+      prompt: result.routeChoice.prompt,
+      options: [HIGHWAY_CHOICE, DIRT_CHOICE],
+      expiresAtMs: result.routeChoice.expiresAtMs
+    };
+  } else {
+    player.pendingDecisionPoint = null;
+  }
 }
 
 function calculateDifficulty(player: PlayerStateRecord, correctAnswer: boolean) {
@@ -448,21 +573,18 @@ function applyBoost(player: PlayerStateRecord, multiplier: number, durationMs: n
 }
 
 function shouldOfferDecision(player: PlayerStateRecord, now: number) {
-  if (player.pendingDecisionPoint || player.highwayChallengeActive) {
-    return false;
-  }
-  if (now < player.decisionCooldownUntilMs) {
-    return false;
-  }
-  return Math.random() < DECISION_TRIGGER_PROBABILITY;
+  void player;
+  void now;
+  return false;
 }
 
 function issueDecision(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
+  const routeChoice = createRouteChoicePrompt(now);
   const point: DecisionPointRecord = {
-    eventId: crypto.randomUUID(),
-    prompt: "Choose route: HIGHWAY (hard question, huge boost) or DIRT (safe bonus).",
+    eventId: routeChoice.id,
+    prompt: routeChoice.prompt,
     options: [HIGHWAY_CHOICE, DIRT_CHOICE],
-    expiresAtMs: now + DECISION_TTL_MS
+    expiresAtMs: routeChoice.expiresAtMs
   };
   player.pendingDecisionPoint = point;
   return toDecisionMessage(room.roomId, player, point);
@@ -477,8 +599,15 @@ function resetPlayerForNewRace(player: PlayerStateRecord) {
   player.lap = 0;
   player.finished = false;
   player.correctStreak = 0;
+  player.correctAnswers = player.correctAnswers ?? 0;
+  player.wrongAnswers = player.wrongAnswers ?? 0;
+  player.timeoutAnswers = player.timeoutAnswers ?? 0;
+  player.score = player.score ?? 0;
+  player.totalAnswerTimeMs = player.totalAnswerTimeMs ?? 0;
+  player.answerCount = player.answerCount ?? 0;
   player.pendingQuestion = null;
   player.pendingDecisionPoint = null;
+  player.questionState = createInitialPlayerQuestionState();
   player.decisionCooldownUntilMs = 0;
   player.highwayChallengeActive = false;
   player.racePhase = "lobby";
@@ -495,6 +624,7 @@ function resetRoomForNewRace(room: GameRoomStateRecord, now: number) {
   room.tick = 0;
   room.winnerPlayerId = null;
   room.resultHistoryId = null;
+  room.endedAtMs = 0;
   for (const player of Object.values(room.players)) {
     resetPlayerForNewRace(player);
   }
@@ -509,6 +639,7 @@ function activateRace(room: GameRoomStateRecord, startAtMs: number) {
   room.lastInteractionAtMs = startAtMs;
   room.tick = 0;
   room.winnerPlayerId = null;
+  room.endedAtMs = 0;
 
   for (const player of Object.values(room.players)) {
     player.racePhase = "active";
@@ -533,6 +664,7 @@ function scheduleRaceStart(room: GameRoomStateRecord, now: number) {
   room.lastInteractionAtMs = now;
   room.tick = 0;
   room.resultHistoryId = null;
+  room.endedAtMs = 0;
 
   for (const player of Object.values(room.players)) {
     resetPlayerForNewRace(player);
@@ -562,6 +694,7 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
   room.raceStartingAtMs = 0;
   room.raceStopped = true;
   room.raceStoppedAtMs = now;
+  room.endedAtMs = now;
   room.winnerPlayerId = winner.playerId;
   room.resultHistoryId = room.resultHistoryId ?? buildHistoryId(room.roomId, room.raceStartedAtMs);
 
@@ -580,6 +713,9 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
 
 function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateRecord, deltaSeconds: number, now: number) {
   if (room.raceStopped || !isRaceActive(room.racePhase) || player.finished || player.racePhase !== "active") {
+    return null;
+  }
+  if (room.teacherSessionId) {
     return null;
   }
 
@@ -633,21 +769,10 @@ function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateReco
 }
 
 function refreshExpiredQuestion(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
-  if (
-    room.raceStopped
-    || !isRaceActive(room.racePhase)
-    || player.racePhase !== "active"
-    || !player.pendingQuestion
-    || now <= player.pendingQuestion.expiresAtMs
-  ) {
-    return;
-  }
-
-  player.correctStreak = 0;
-  player.highwayChallengeActive = false;
-  player.speedMps = Math.max(MIN_SPEED_MPS, player.speedMps - TIMEOUT_ANSWER_SPEED_PENALTY_MPS);
-  issueNewQuestion(room, player, 1, false, now);
-  return true;
+  void room;
+  void player;
+  void now;
+  return false;
 }
 
 function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateRecord, now: number) {
@@ -665,7 +790,9 @@ function clearExpiredDecision(room: GameRoomStateRecord, player: PlayerStateReco
   player.highwayChallengeActive = false;
 
   if (!player.pendingQuestion && !player.finished) {
-    issueNewQuestion(room, player, 1, false, now);
+    const result = chooseRoute(getPlayerQuestionState(player), "DIRT_ROAD", now);
+    setPlayerQuestionState(player, result.state);
+    syncPendingQuestionFromState(player);
   }
   return true;
 }
@@ -682,15 +809,11 @@ function pruneInactivePlayers(room: GameRoomStateRecord, presenceByPlayerId: Pre
         : !isFreshSession(player.session, now)
     );
     if (isStale) {
-      delete room.players[playerId];
+      player.connected = false;
+      player.disconnectedAtMs = player.disconnectedAtMs || now;
+      player.session = null;
       presenceDeletes.push({ roomId: room.roomId, playerId });
       removedAnyPlayers = true;
-      if (playerId === room.winnerPlayerId) {
-        removedWinner = true;
-      }
-      if (playerId === room.roomCreatorPlayerId) {
-        removedCreator = true;
-      }
     }
   }
 
@@ -825,12 +948,26 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
       speedMps: round(Math.max(0, sanitizeFinite(player.speedMps, 0))),
       lap: safeLap,
       finished: player.finished,
-      racePhase: normalizeStoredPlayerRacePhase(player, room)
+      racePhase: normalizeStoredPlayerRacePhase(player, room),
+      carId: normalizeCarId(player.carId),
+      ready: Boolean(player.ready),
+      connected: player.connected !== false && Boolean(player.session),
+      disconnectedAtMs: Math.max(0, Math.trunc(player.disconnectedAtMs ?? 0)),
+      correctAnswers: Math.max(0, Math.trunc(player.correctAnswers ?? 0)),
+      wrongAnswers: Math.max(0, Math.trunc(player.wrongAnswers ?? 0)),
+      timeoutAnswers: Math.max(0, Math.trunc(player.timeoutAnswers ?? 0)),
+      score: Math.trunc(player.score ?? 0),
+      routeMode: player.questionState?.routeMode ?? "NORMAL",
+      streak: Math.max(0, Math.trunc(player.correctStreak ?? 0)),
+      averageAnswerTimeMs: (player.answerCount ?? 0) > 0
+        ? Math.round(Math.max(0, player.totalAnswerTimeMs ?? 0) / Math.max(1, player.answerCount ?? 1))
+        : 0
     };
   });
 
   return {
     roomId: room.roomId,
+    lifecycleStatus: roomLifecycleStatus(room),
     serverTimeMs: now,
     tick: room.tick,
     racePhase: room.racePhase,
@@ -839,7 +976,7 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     raceStopped: room.raceStopped,
     raceStoppedAtMs: room.raceStoppedAtMs,
     winnerPlayerId: room.winnerPlayerId,
-    roomCreatorPlayerId: pickRoomHost(room) ?? "",
+    roomCreatorPlayerId: room.teacherSessionId ? "" : (pickRoomHost(room) ?? ""),
     roomSettings: room.roomSettings,
     players
   };
@@ -853,8 +990,9 @@ function buildJoinMessage(room: GameRoomStateRecord, player: PlayerStateRecord):
     trackLengthMeters: room.trackLengthMeters,
     totalLaps: room.totalLaps,
     baseSpeedMps: BASE_SPEED_MPS,
-    roomCreatorPlayerId: room.roomCreatorPlayerId ?? player.playerId,
-    roomSettings: room.roomSettings
+    roomCreatorPlayerId: room.roomCreatorPlayerId ?? (room.teacherSessionId ? "" : player.playerId),
+    roomSettings: room.roomSettings,
+    carId: normalizeCarId(player.carId)
   };
 }
 
@@ -920,14 +1058,59 @@ export function joinRoom(
   let player = room.players[request.playerId] ?? null;
   const joinPhase = room.racePhase;
   const isExistingMember = Boolean(player);
-  if (!isExistingMember && joinPhase !== "lobby") {
+  if (!isExistingMember && room.removedPlayerIds?.[request.playerId]) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_REMOVED", "You were removed from the room by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (!isExistingMember && room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (!isExistingMember && room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (!isExistingMember && room.isLocked) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_LOCKED", "Registration is locked for this room.", room.roomId, request.playerId)
+    };
+  }
+  if (!isExistingMember && joinPhase === "finish") {
     return {
       persist: false,
       room,
       presenceDeletes: advanceResult.presenceDeletes,
       response: errorResponse(
         "ROOM_MEMBERSHIP_LOCKED",
-        `Join rejected: room is in ${joinPhase}. New players can only join while the room is in the lobby.`,
+        "Join rejected: this classroom race has finished.",
+        room.roomId,
+        request.playerId
+      )
+    };
+  }
+  if (!isExistingMember && (joinPhase === "active" || joinPhase === "starting") && room.allowMidGameJoin === false) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse(
+        "ROOM_ALREADY_STARTED",
+        "This classroom race has already started.",
         room.roomId,
         request.playerId
       )
@@ -989,16 +1172,25 @@ export function joinRoom(
 
   const displayName = normalizeDisplayName(request.displayName, request.playerId);
   if (!player) {
-    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % MAX_MAX_PLAYERS, now);
+    player = createPlayerState(request.playerId, displayName, Object.keys(room.players).length % MAX_MAX_PLAYERS, now, request.carId);
+    if (room.racePhase === "active" || room.racePhase === "starting") {
+      player.racePhase = room.racePhase;
+    }
     room.players[player.playerId] = player;
   } else {
     player.displayName = displayName;
+    player.carId = normalizeCarId(request.carId);
+    if (room.racePhase === "active" || room.racePhase === "starting") {
+      player.racePhase = player.finished ? "finish" : room.racePhase;
+    }
   }
 
   room.roomCreatorPlayerId = pickRoomHost(room);
   room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length));
 
   player.session = buildSession(player.session, request.sessionId, now);
+  player.connected = true;
+  player.disconnectedAtMs = 0;
   player.session.lastJoinAtMs = now;
   touchSession(player, now);
   room.lastInteractionAtMs = now;
@@ -1051,6 +1243,30 @@ export function startRace(
 
   const room = existingRoom;
   const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (room.removedPlayerIds?.[request.playerId]) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_REMOVED", "You were removed from the room by the teacher.", room.roomId, request.playerId)
+    };
+  }
   const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, presenceByPlayerId, now);
   if (!player) {
     return {
@@ -1123,6 +1339,30 @@ export function syncRoom(
 
   const room = existingRoom;
   const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (room.removedPlayerIds?.[request.playerId]) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_REMOVED", "You were removed from the room by the teacher.", room.roomId, request.playerId)
+    };
+  }
   const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, presenceByPlayerId, now);
   if (!player) {
     return {
@@ -1154,13 +1394,56 @@ export function syncRoom(
   };
 }
 
-function buildAnswerFeedback(roomId: string, playerId: string, accepted: boolean, correct: boolean): AnswerFeedbackMessage {
+function buildAnswerFeedback(
+  roomId: string,
+  playerId: string,
+  accepted: boolean,
+  correct: boolean,
+  extra: Partial<AnswerFeedbackMessage> = {}
+): AnswerFeedbackMessage {
   return {
     roomId,
     targetPlayerId: playerId,
     accepted,
-    correct
+    correct,
+    ...extra
   };
+}
+
+function getPlayerProgressMeters(room: GameRoomStateRecord, player: PlayerStateRecord) {
+  if (room.teacherSessionId) {
+    return Math.max(0, Math.trunc(player.score ?? 0));
+  }
+  return (Math.max(0, Math.min(room.totalLaps, player.lap)) * room.trackLengthMeters)
+    + Math.max(0, Math.min(room.trackLengthMeters, sanitizeFinite(player.positionMeters, 0)));
+}
+
+function setPlayerProgressMeters(room: GameRoomStateRecord, player: PlayerStateRecord, progressMeters: number) {
+  const finishThreshold = Math.max(1, Math.trunc(room.targetScore ?? room.roomSettings.targetScore ?? room.trackLengthMeters * room.totalLaps));
+  const clamped = Math.max(0, Math.min(finishThreshold, sanitizeFinite(progressMeters, 0)));
+  if (room.teacherSessionId) {
+    player.score = Math.trunc(clamped);
+    player.lap = clamped >= finishThreshold ? room.totalLaps : 0;
+    player.positionMeters = clamped;
+    if (clamped >= finishThreshold) {
+      player.finished = true;
+    }
+    return clamped;
+  }
+  player.lap = Math.min(room.totalLaps, Math.floor(clamped / room.trackLengthMeters));
+  player.positionMeters = player.lap >= room.totalLaps
+    ? room.trackLengthMeters
+    : clamped - (player.lap * room.trackLengthMeters);
+  if (clamped >= finishThreshold) {
+    player.lap = room.totalLaps;
+    player.positionMeters = room.trackLengthMeters;
+    player.finished = true;
+  }
+  return clamped;
+}
+
+function applyProgressDelta(room: GameRoomStateRecord, player: PlayerStateRecord, progressDelta: number) {
+  return setPlayerProgressMeters(room, player, getPlayerProgressMeters(room, player) + progressDelta);
 }
 
 export function submitAnswer(
@@ -1179,6 +1462,30 @@ export function submitAnswer(
 
   const room = existingRoom;
   const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (room.removedPlayerIds?.[request.playerId]) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_REMOVED", "You were removed from the room by the teacher.", room.roomId, request.playerId)
+    };
+  }
   const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, presenceByPlayerId, now);
   if (!player) {
     return {
@@ -1248,7 +1555,7 @@ export function submitAnswer(
   }
 
   const pending = player.pendingQuestion;
-  const expectedQuestion = pending.question.questionId === request.questionId;
+  const expectedQuestion = pending.question.id === request.questionId;
   if (!expectedQuestion) {
     return {
       persist: false,
@@ -1268,47 +1575,128 @@ export function submitAnswer(
   touchSession(player, now);
   room.lastInteractionAtMs = now;
 
-  const notExpired = now <= (pending.expiresAtMs + ANSWER_GRACE_MS);
-  const submittedAnswer = typeof request.answer === "string" ? request.answer.trim() : "";
-  const correct = notExpired && submittedAnswer.toLowerCase() === pending.question.correctAnswer.trim().toLowerCase();
+  const questionState = getPlayerQuestionState(player);
+  if (hasAnsweredQuestion(questionState, pending.question.id)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
+      response: {
+        ...buildResponseForPlayer(room, player, now),
+        answerFeedback: buildAnswerFeedback(room.roomId, player.playerId, false, false)
+      }
+    };
+  }
 
-  if (correct) {
-    player.correctStreak += 1;
+  const timeoutRequestedBeforeExpiry = Boolean(request.timeout) && now < pending.question.expiresAtMs;
+  if (timeoutRequestedBeforeExpiry) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
+      response: buildResponseForPlayer(room, player, now)
+    };
+  }
+
+  const validation = validateAnswer(pending.question, request.answer, now);
+  const resultType: QuestionResultType = validation.resultType;
+  const correct = validation.correct;
+  const score = scoreAnswer(pending.question, resultType);
+  const answeredInMs = Math.max(
+    0,
+    Math.min(
+      pending.question.timeLimitSeconds * 1000,
+      (pending.question.timeLimitSeconds * 1000) - Math.max(0, pending.question.expiresAtMs - now)
+    )
+  );
+  player.answerCount = Math.max(0, player.answerCount ?? 0) + 1;
+  player.totalAnswerTimeMs = Math.max(0, player.totalAnswerTimeMs ?? 0) + answeredInMs;
+  const updatedProgress = applyProgressDelta(room, player, score.progressDelta);
+
+  if (resultType === "CORRECT") {
+    player.correctAnswers = Math.max(0, player.correctAnswers ?? 0) + 1;
     let boostDuration = BASE_BOOST_DURATION_MS;
-    let boostMultiplier = pending.question.boostMultiplier;
-    if (pending.fromHighwayChallenge) {
-      player.positionMeters += HIGHWAY_TELEPORT_METERS;
-      boostMultiplier *= 1.35;
+    let boostMultiplier = pending.question.routeMode === "HIGHWAY" ? 1.6 : pending.question.routeMode === "DIRT_ROAD" ? 0.85 : 1;
+    if (pending.question.routeMode === "HIGHWAY") {
       boostDuration += HIGHWAY_SUPER_BOOST_MS;
       player.highwayChallengeActive = false;
     }
     applyBoost(player, boostMultiplier, boostDuration, now);
+  } else if (resultType === "TIMEOUT") {
+    player.timeoutAnswers = Math.max(0, player.timeoutAnswers ?? 0) + 1;
+    player.highwayChallengeActive = false;
+    player.speedMps = Math.max(MIN_SPEED_MPS, player.speedMps - TIMEOUT_ANSWER_SPEED_PENALTY_MPS);
   } else {
-    player.correctStreak = 0;
+    player.wrongAnswers = Math.max(0, player.wrongAnswers ?? 0) + 1;
     player.highwayChallengeActive = false;
     player.speedMps = Math.max(MIN_SPEED_MPS, player.speedMps - WRONG_ANSWER_SPEED_PENALTY_MPS);
   }
 
-  player.pendingQuestion = null;
+  const advanced = advanceQuestionStateAfterAnswer(questionState, pending.question, resultType, now, getRoomQuestionDifficulty(room));
+  setPlayerQuestionState(player, advanced.state);
+  syncPendingQuestionFromState(player);
 
   let decision: DecisionPointMessage | null = null;
-  if (correct && shouldOfferDecision(player, now)) {
-    decision = issueDecision(room, player, now);
+  if (advanced.routeChoice) {
+    player.pendingDecisionPoint = {
+      eventId: advanced.routeChoice.id,
+      prompt: advanced.routeChoice.prompt,
+      options: [HIGHWAY_CHOICE, DIRT_CHOICE],
+      expiresAtMs: advanced.routeChoice.expiresAtMs
+    };
+    decision = toDecisionMessage(room.roomId, player, player.pendingDecisionPoint);
   } else {
-    issueNewQuestion(room, player, calculateDifficulty(player, correct), false, now);
+    player.pendingDecisionPoint = null;
+  }
+
+  if (player.finished && !room.raceStopped) {
+    stopRace(room, player, now);
   }
 
   const prompt = currentPrompt(room, player, now);
+  const answerEvent = resultType === "CORRECT"
+    ? "ANSWER_CORRECT"
+    : resultType === "WRONG"
+      ? "ANSWER_WRONG"
+      : "ANSWER_TIMEOUT";
   return {
     persist: true,
     room,
+    skipClassroomSync: true,
+    roomEvents: [
+      {
+        eventType: answerEvent,
+        payload: {
+          playerId: player.playerId,
+          questionId: pending.question.id,
+          pointsDelta: score.pointsDelta,
+          progressDelta: score.progressDelta,
+          routeMode: pending.question.routeMode
+        }
+      },
+      ...advanced.events.map((eventType) => ({
+        eventType,
+        payload: { playerId: player.playerId }
+      }))
+    ],
     presenceDeletes: advanceResult.presenceDeletes,
     presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
     response: {
       stateUpdate: buildStateUpdate(room, now),
       question: prompt.question,
       decision: decision ?? prompt.decision,
-      answerFeedback: buildAnswerFeedback(room.roomId, player.playerId, true, correct),
+      answerFeedback: buildAnswerFeedback(room.roomId, player.playerId, true, correct, {
+        resultType,
+        feedback: score.feedback,
+        pointsDelta: score.pointsDelta,
+        progressDelta: score.progressDelta,
+        updatedProgress,
+        streak: player.correctStreak,
+        submittedAnswer: validation.submittedAnswer,
+        expectedAnswer: validation.expectedAnswer
+      }),
       error: null
     }
   };
@@ -1330,6 +1718,30 @@ export function submitDecision(
 
   const room = existingRoom;
   const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  if (room.removedPlayerIds?.[request.playerId]) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_REMOVED", "You were removed from the room by the teacher.", room.roomId, request.playerId)
+    };
+  }
   const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, presenceByPlayerId, now);
   if (!player) {
     return {
@@ -1365,7 +1777,9 @@ export function submitDecision(
     if (now > (point?.expiresAtMs ?? 0)) {
       player.pendingDecisionPoint = null;
       if (!player.pendingQuestion) {
-        issueNewQuestion(room, player, 1, false, now);
+        const result = chooseRoute(getPlayerQuestionState(player), "DIRT_ROAD", now);
+        setPlayerQuestionState(player, result.state);
+        syncPendingQuestionFromState(player);
       }
     }
     return {
@@ -1388,11 +1802,14 @@ export function submitDecision(
 
   if (request.choice === HIGHWAY_CHOICE) {
     player.highwayChallengeActive = true;
-    issueNewQuestion(room, player, 3, true, now);
+    const result = chooseRoute(getPlayerQuestionState(player), "HIGHWAY", now);
+    setPlayerQuestionState(player, result.state);
+    syncPendingQuestionFromState(player);
   } else if (request.choice === DIRT_CHOICE) {
     player.highwayChallengeActive = false;
-    applyBoost(player, 0.6, 1600, now);
-    issueNewQuestion(room, player, Math.max(1, calculateDifficulty(player, true) - 1), false, now);
+    const result = chooseRoute(getPlayerQuestionState(player), "DIRT_ROAD", now);
+    setPlayerQuestionState(player, result.state);
+    syncPendingQuestionFromState(player);
   } else {
     player.pendingDecisionPoint = point;
   }
@@ -1432,14 +1849,9 @@ export function leaveRoom(
     };
   }
 
-  delete room.players[request.playerId];
-  if (request.playerId === room.winnerPlayerId) {
-    room.winnerPlayerId = null;
-  }
-  if (request.playerId === room.roomCreatorPlayerId) {
-    room.roomCreatorPlayerId = pickRoomHost(room);
-  }
-  rebalanceLanes(room);
+  player.connected = false;
+  player.disconnectedAtMs = now;
+  player.session = null;
   room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS));
   if (!anyPlayersActivelyRacing(room)) {
     resetRoomForNewRace(room, now);
@@ -1582,6 +1994,590 @@ export function updateRoomSettings(
     presenceDeletes: advanceResult.presenceDeletes,
     presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
     response: buildResponseForPlayer(room, player, now)
+  };
+}
+
+export function setPlayerReady(
+  existingRoom: GameRoomStateRecord | null,
+  request: SetReadyRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId, request.playerId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (room.deletedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_DELETED", "This room is no longer available.", room.roomId, request.playerId)
+    };
+  }
+  if (room.closedAtMs) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_CLOSED", "This room was closed by the teacher.", room.roomId, request.playerId)
+    };
+  }
+  const player = ensureAuthorizedPlayer(room, request.playerId, request.sessionId, presenceByPlayerId, now);
+  if (!player) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+  if (room.racePhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("READY_LOCKED", "Ready status can only be changed before the race starts.", room.roomId, request.playerId)
+    };
+  }
+  player.ready = Boolean(request.ready);
+  touchSession(player, now);
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
+    response: buildResponseForPlayer(room, player, now)
+  };
+}
+
+function ensureAuthorizedTeacher(room: GameRoomStateRecord, teacherSessionId: string) {
+  return Boolean(room.teacherSessionId && teacherSessionId && room.teacherSessionId === teacherSessionId);
+}
+
+function teacherUnauthorized(roomId: string) {
+  return errorResponse(
+    "TEACHER_SESSION_NOT_AUTHORIZED",
+    "Teacher session is not authorized for this room.",
+    roomId
+  );
+}
+
+export function teacherCreateRoom(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherCreateRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  const room = existingRoom ?? createRoomState(request.roomId, now);
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+
+  if (room.racePhase !== "lobby" && room.teacherSessionId && room.teacherSessionId !== request.teacherSessionId) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_IN_USE", "This teacher room is already active.", room.roomId)
+    };
+  }
+
+  room.teacherSessionId = request.teacherSessionId;
+  room.teacherLastSeenAtMs = now;
+  room.isListed = true;
+  room.isLocked = false;
+  room.requiresApproval = false;
+  room.className = typeof request.className === "string" ? request.className : request.roomSettings.classGroup ?? null;
+  room.difficulty = request.roomSettings.difficulty ?? (typeof request.difficulty === "string" ? request.difficulty : "MEDIUM");
+  room.mapId = request.roomSettings.mapId ?? (typeof request.mapId === "string" ? request.mapId : "sunny-forest");
+  room.questionTypes = ["MIXED"];
+  room.allowMidGameJoin = true;
+  room.closedAtMs = 0;
+  room.deletedAtMs = 0;
+  room.endedAtMs = 0;
+  room.roomSettings = normalizeRoomSettings(
+    room.roomId,
+    {
+      ...request.roomSettings,
+      classGroup: typeof request.className === "string" ? request.className : request.roomSettings.classGroup,
+      difficulty: room.difficulty as RoomSettings["difficulty"],
+      mapId: room.mapId ?? undefined,
+      maxPlayers: MAX_MAX_PLAYERS,
+      operations: "MIXED"
+    },
+    MAX_MAX_PLAYERS
+  );
+  room.targetScore = room.roomSettings.targetScore;
+  room.trackLengthMeters = room.targetScore;
+  room.totalLaps = 1;
+  room.lastInteractionAtMs = now;
+
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherSyncRoom(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  room.teacherLastSeenAtMs = now;
+  return {
+    persist: advanceResult.persist,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherUpdateRoomSettings(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherUpdateRoomSettingsRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+  if (room.racePhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_SETTINGS_LOCKED", "Teacher setup can only be edited while the room is in the lobby.", room.roomId)
+    };
+  }
+
+  room.roomSettings = normalizeRoomSettings(
+    room.roomId,
+    { ...request.roomSettings, maxPlayers: MAX_MAX_PLAYERS, operations: "MIXED" },
+    MAX_MAX_PLAYERS
+  );
+  room.className = room.roomSettings.classGroup ?? room.className ?? null;
+  room.difficulty = room.roomSettings.difficulty ?? room.difficulty ?? "MEDIUM";
+  room.mapId = room.roomSettings.mapId ?? room.mapId ?? "sunny-forest";
+  room.targetScore = room.roomSettings.targetScore;
+  room.trackLengthMeters = room.targetScore;
+  room.totalLaps = 1;
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherStartRace(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+  const players = Object.values(room.players);
+  if (players.length === 0 || room.racePhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("ROOM_NOT_READY", "Race can only start when students are in the lobby.", room.roomId)
+    };
+  }
+
+  scheduleRaceStart(room, now);
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  room.isListed = true;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherRemovePlayer(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRemovePlayerRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  room.removedPlayerIds = {
+    ...(room.removedPlayerIds ?? {}),
+    [request.targetPlayerId]: now
+  };
+  delete room.players[request.targetPlayerId];
+  if (request.targetPlayerId === room.winnerPlayerId) {
+    room.winnerPlayerId = null;
+  }
+  if (request.targetPlayerId === room.roomCreatorPlayerId) {
+    room.roomCreatorPlayerId = pickRoomHost(room);
+  }
+  rebalanceLanes(room);
+  room.roomSettings = normalizeRoomSettings(room.roomId, room.roomSettings, Math.max(MIN_MAX_PLAYERS, Object.keys(room.players).length || MIN_MAX_PLAYERS));
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  if (!room.teacherSessionId && !anyPlayersActivelyRacing(room)) {
+    resetRoomForNewRace(room, now);
+  }
+
+  return {
+    persist: true,
+    room,
+    presenceDeletes: [
+      ...advanceResult.presenceDeletes,
+      { roomId: room.roomId, playerId: request.targetPlayerId }
+    ],
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherApprovePlayer(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRemovePlayerRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+  if (room.racePhase !== "lobby") {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("APPROVAL_LOCKED", "Students can only be approved before the race starts.", room.roomId)
+    };
+  }
+  const player = room.players[request.targetPlayerId];
+  if (!player) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: errorResponse("PLAYER_NOT_FOUND", "Student is no longer in this room.", room.roomId)
+    };
+  }
+
+  player.ready = true;
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  touchSession(player, now);
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherReturnToLobby(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  resetRoomForNewRace(room, now);
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherFinishRoom(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  room.racePhase = "finish";
+  room.raceStartingAtMs = 0;
+  room.raceStopped = true;
+  room.raceStoppedAtMs = now;
+  room.endedAtMs = now;
+  room.isListed = false;
+  room.isLocked = true;
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  for (const player of Object.values(room.players)) {
+    player.racePhase = "finish";
+    player.pendingQuestion = null;
+    player.pendingDecisionPoint = null;
+    player.speedMps = 0;
+  }
+
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherCloseRoom(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  room.closedAtMs = now;
+  room.isListed = false;
+  room.isLocked = true;
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
+  };
+}
+
+export function teacherDeleteRoom(
+  existingRoom: GameRoomStateRecord | null,
+  request: TeacherRoomRequest,
+  presenceByPlayerId: PresenceByPlayerId,
+  now: number
+): RoomMutationResult {
+  if (!existingRoom) {
+    return {
+      persist: false,
+      room: null,
+      response: errorResponse("ROOM_NOT_FOUND", "Race room not found.", request.roomId)
+    };
+  }
+
+  const room = existingRoom;
+  const advanceResult = advanceRoomToNow(room, presenceByPlayerId, now);
+  if (!ensureAuthorizedTeacher(room, request.teacherSessionId)) {
+    return {
+      persist: false,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      response: teacherUnauthorized(room.roomId)
+    };
+  }
+
+  room.deletedAtMs = now;
+  room.closedAtMs = room.closedAtMs || now;
+  room.isListed = false;
+  room.isLocked = true;
+  room.teacherLastSeenAtMs = now;
+  room.lastInteractionAtMs = now;
+  return {
+    persist: true,
+    room,
+    presenceDeletes: advanceResult.presenceDeletes,
+    response: {
+      stateUpdate: buildStateUpdate(room, now),
+      question: null,
+      decision: null,
+      error: null
+    }
   };
 }
 

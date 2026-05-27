@@ -1,16 +1,25 @@
+import type { PlayerQuestionState, RaceQuestionPrivate } from "./questions/questionTypes.ts";
+
 export type RacePhase = "lobby" | "starting" | "active" | "finish";
+export type RoomLifecycleStatus = "WAITING" | "RACING" | "FINISHED" | "CLOSED" | "DELETED";
 
 export interface RoomSettings {
   raceName: string;
   maxPlayers: number;
   raceDurationSeconds: number;
   questionTimeLimitSeconds: number;
+  classGroup?: string;
+  difficulty?: "EASY" | "MEDIUM" | "HARD";
+  mapId?: string;
+  targetScore: number;
+  operations?: "MIXED";
 }
 
 export interface JoinRoomRequest {
   roomId: string;
   playerId: string;
   displayName: string;
+  carId?: string;
 }
 
 export interface JoinGameRequest extends JoinRoomRequest {
@@ -29,9 +38,37 @@ export interface UpdateRoomSettingsRequest extends SyncRoomRequest {
   roomSettings: RoomSettings;
 }
 
+export interface SetReadyRequest extends SyncRoomRequest {
+  ready: boolean;
+}
+
+export interface TeacherRoomRequest {
+  roomId: string;
+  roomCode?: string;
+  teacherSessionId: string;
+}
+
+export interface TeacherCreateRoomRequest extends TeacherRoomRequest {
+  roomSettings: RoomSettings;
+  className?: string;
+  difficulty?: string;
+  mapId?: string;
+  requiresApproval?: boolean;
+  questionTypes?: string[];
+}
+
+export interface TeacherUpdateRoomSettingsRequest extends TeacherRoomRequest {
+  roomSettings: RoomSettings;
+}
+
+export interface TeacherRemovePlayerRequest extends TeacherRoomRequest {
+  targetPlayerId: string;
+}
+
 export interface AnswerSubmissionRequest extends SyncRoomRequest {
   questionId: string;
   answer: string;
+  timeout?: boolean;
 }
 
 export interface DecisionChoiceRequest extends SyncRoomRequest {
@@ -48,6 +85,7 @@ export interface RoomJoinedMessage {
   baseSpeedMps: number;
   roomCreatorPlayerId: string;
   roomSettings: RoomSettings;
+  carId?: string;
 }
 
 export interface PlayerSnapshot {
@@ -60,10 +98,22 @@ export interface PlayerSnapshot {
   lap: number;
   finished: boolean;
   racePhase: RacePhase;
+  carId?: string;
+  ready?: boolean;
+  connected?: boolean;
+  disconnectedAtMs?: number;
+  correctAnswers?: number;
+  wrongAnswers?: number;
+  timeoutAnswers?: number;
+  score?: number;
+  routeMode?: string;
+  streak?: number;
+  averageAnswerTimeMs?: number;
 }
 
 export interface GameStateUpdateMessage {
   roomId: string;
+  lifecycleStatus?: RoomLifecycleStatus;
   serverTimeMs: number;
   tick: number;
   racePhase: RacePhase;
@@ -81,9 +131,16 @@ export interface QuestionMessage {
   roomId: string;
   targetPlayerId: string;
   questionId: string;
+  id?: string;
+  kind?: string;
+  routeMode?: string;
+  operation?: string;
   prompt: string;
   difficulty: number;
+  difficultyLabel?: string;
   timeLimitMs: number;
+  timeLimitSeconds?: number;
+  createdAtMs?: number;
   expiresAtMs: number;
   highwayChallenge: boolean;
 }
@@ -102,6 +159,14 @@ export interface AnswerFeedbackMessage {
   targetPlayerId: string;
   accepted: boolean;
   correct: boolean;
+  resultType?: "CORRECT" | "WRONG" | "TIMEOUT";
+  feedback?: "correct" | "wrong" | "timeout";
+  pointsDelta?: number;
+  progressDelta?: number;
+  updatedProgress?: number;
+  streak?: number;
+  submittedAnswer?: string;
+  expectedAnswer?: number;
 }
 
 export interface GameErrorMessage {
@@ -130,7 +195,7 @@ export interface GeneratedQuestionRecord {
 }
 
 export interface PendingQuestionRecord {
-  question: GeneratedQuestionRecord;
+  question: RaceQuestionPrivate;
   expiresAtMs: number;
   fromHighwayChallenge: boolean;
 }
@@ -154,6 +219,7 @@ export interface PlayerSessionRecord {
 export interface PlayerStateRecord {
   playerId: string;
   displayName: string;
+  carId?: string;
   joinedAtMs?: number;
   laneIndex: number;
   positionMeters: number;
@@ -164,11 +230,21 @@ export interface PlayerStateRecord {
   lap: number;
   finished: boolean;
   correctStreak: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  timeoutAnswers?: number;
+  score?: number;
+  totalAnswerTimeMs: number;
+  answerCount: number;
   pendingQuestion: PendingQuestionRecord | null;
   pendingDecisionPoint: DecisionPointRecord | null;
+  questionState?: PlayerQuestionState | null;
   decisionCooldownUntilMs: number;
   highwayChallengeActive: boolean;
   racePhase: RacePhase;
+  ready?: boolean;
+  connected?: boolean;
+  disconnectedAtMs?: number;
   session: PlayerSessionRecord | null;
 }
 
@@ -187,6 +263,21 @@ export interface GameRoomStateRecord {
   lastInteractionAtMs: number;
   winnerPlayerId: string | null;
   roomCreatorPlayerId: string | null;
+  teacherSessionId?: string | null;
+  teacherLastSeenAtMs?: number;
+  requiresApproval?: boolean;
+  className?: string | null;
+  difficulty?: string | null;
+  mapId?: string | null;
+  questionTypes?: string[];
+  targetScore?: number;
+  isLocked?: boolean;
+  isListed?: boolean;
+  allowMidGameJoin?: boolean;
+  endedAtMs?: number;
+  closedAtMs?: number;
+  deletedAtMs?: number;
+  removedPlayerIds?: Record<string, number>;
   roomSettings: RoomSettings;
   resultHistoryId: string | null;
   players: Record<string, PlayerStateRecord>;
@@ -246,6 +337,11 @@ export interface RoomMutationResult {
   persist: boolean;
   room: GameRoomStateRecord | null;
   response: GameFunctionResponse;
+  skipClassroomSync?: boolean;
+  roomEvents?: Array<{
+    eventType: string;
+    payload?: Record<string, unknown>;
+  }>;
   profile?: UserProfileUpsert;
   presenceUpserts?: GameRoomPresenceUpsert[];
   presenceDeletes?: GameRoomPresenceDelete[];

@@ -5,6 +5,7 @@ import { Hud } from "./components/Hud";
 import { LobbyPanel } from "./components/LobbyPanel";
 import { QuestionOverlay } from "./components/QuestionOverlay";
 import { TeacherDashboard } from "./components/teacher/TeacherDashboard";
+import { getClassroomAdapterInfo, getClassroomRoomService } from "./game/network/classroomRooms";
 import { gameSocket } from "./game/network/gameSocket";
 import { getConfiguredGameTransport } from "./game/network/transportConfig";
 import { MenuScene, RaceScene } from "./game/scene/RaceScene";
@@ -85,12 +86,49 @@ function App() {
     }
 
     const roomId = normalizeRoomId(params.get("room")?.trim() || "arena-1");
-    const displayName = params.get("name")?.trim() || "Debug Racer";
-    const playerId = normalizePlayerId(params.get("player")?.trim() || "p-debug-1");
+    const persistedSession = gameSocket.getPersistedWebsocketSession();
+    const canResumePersisted = persistedSession?.roomId === roomId;
+    const displayName = params.get("name")?.trim() || (canResumePersisted ? persistedSession.displayName : "Debug Racer");
+    const playerId = normalizePlayerId(params.get("player")?.trim() || (canResumePersisted ? persistedSession.playerId : "p-debug-1"));
 
     autoJoinAttemptedRef.current = true;
-    prepareJoin(roomId, displayName, playerId);
-    gameSocket.connect({ roomId, displayName, playerId });
+    const runAutoJoin = async () => {
+      if (getClassroomAdapterInfo().mode === "supabase") {
+        const room = await getClassroomRoomService().getRoomByCode(roomId).catch(() => null);
+        if (!room) {
+          useGameStore.getState().setConnection("error", "Room not found or not available.");
+          return;
+        }
+        if (room.status === "DELETED" || room.deletedAt) {
+          useGameStore.getState().setConnection("error", "This room is no longer available.");
+          return;
+        }
+        if (room.status === "CLOSED" || room.closedAt) {
+          useGameStore.getState().setConnection("error", "This room was closed by the teacher.");
+          return;
+        }
+        if (room.status === "FINISHED" || room.endedAt) {
+          useGameStore.getState().setConnection("error", "This race has finished.");
+          return;
+        }
+        if (!room.isListed || room.isLocked) {
+          useGameStore.getState().setConnection("error", "This room is not currently available.");
+          return;
+        }
+        if (room.currentPlayers >= room.maxPlayers) {
+          useGameStore.getState().setConnection("error", "Room is full.");
+          return;
+        }
+        if (room.status !== "WAITING" && !(room.status === "RACING" && room.allowMidGameJoin)) {
+          useGameStore.getState().setConnection("error", "This room is not joinable right now.");
+          return;
+        }
+      }
+
+      prepareJoin(roomId, displayName, playerId);
+      gameSocket.connect({ roomId, displayName, playerId });
+    };
+    void runAutoJoin();
   }, [prepareJoin]);
 
   const showMenuScene = connection === "idle" || connection === "connecting" || connection === "error";

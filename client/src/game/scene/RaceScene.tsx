@@ -951,8 +951,11 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
 function CarsLayer() {
   const playerIds = useGameStore((state) => state.playerIds);
   const localPlayerId = useGameStore((state) => state.playerId);
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
   const [deferredCarsReady, setDeferredCarsReady] = useState(false);
   const playerIdSignature = playerIds.join("|");
+  const classroomStudentMode = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   useEffect(() => {
     setDeferredCarsReady(false);
@@ -960,7 +963,9 @@ function CarsLayer() {
     return () => window.clearTimeout(preloadTimer);
   }, [localPlayerId, playerIdSignature]);
 
-  const visiblePlayerIds = deferredCarsReady
+  const visiblePlayerIds = classroomStudentMode
+    ? playerIds.filter((playerId) => playerId === localPlayerId)
+    : deferredCarsReady
     ? playerIds
     : playerIds.filter((playerId) => playerId === localPlayerId);
 

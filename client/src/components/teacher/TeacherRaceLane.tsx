@@ -1,0 +1,100 @@
+import type { TeacherPlayerView } from "./teacherTypes";
+import { TeacherCarIcon } from "./TeacherCarIcon";
+
+interface TeacherRaceLaneProps {
+  laneNumber: number;
+  player?: TeacherPlayerView;
+}
+
+function clampProgress(progressPercent: number) {
+  return Math.max(0, Math.min(100, progressPercent));
+}
+
+function statusTone(status: TeacherPlayerView["status"]) {
+  if (status === "RACING") {
+    return "text-emerald-100";
+  }
+  if (status === "JOINED") {
+    return "text-cyan-100";
+  }
+  if (status === "FINISHED") {
+    return "text-violet-100";
+  }
+  return "text-slate-300";
+}
+
+export function TeacherRaceLane({ laneNumber, player }: TeacherRaceLaneProps) {
+  if (!player) {
+    return (
+      <article className="grid min-h-12 grid-cols-[7rem_minmax(0,1fr)_4rem] items-center gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2 opacity-70">
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">Lane {laneNumber}</p>
+          <p className="truncate text-xs text-slate-500">Waiting for student</p>
+        </div>
+        <Track progress={0} inactive />
+        <p className="text-right text-xs font-bold text-slate-600">Empty</p>
+      </article>
+    );
+  }
+
+  const progress = clampProgress(player.progressPercent);
+  const disconnected = player.status === "DISCONNECTED" || player.connected === false;
+
+  return (
+    <article className={`grid min-h-[68px] grid-cols-[16rem_minmax(0,1fr)_5rem] items-center gap-3 rounded-md border px-3 py-2 shadow-[0_6px_18px_rgba(2,8,23,0.16)] max-lg:grid-cols-1 ${disconnected ? "border-slate-500/20 bg-slate-800/22 opacity-65" : "border-cyan-100/16 bg-white/[0.055]"}`}>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-100/28 bg-cyan-100/12 text-xs font-black text-cyan-50">
+            {laneNumber}
+          </span>
+          <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-100/65">Lane {laneNumber}</span>
+          <span className="rounded-full border border-white/10 bg-slate-950/30 px-2 py-0.5 text-[10px] font-black text-white">#{player.rank}</span>
+          <p className="min-w-0 truncate text-sm font-black text-white">{player.name}</p>
+        </div>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold">
+          <span className="max-w-28 truncate text-slate-300">{player.carName ?? "Selected car"}</span>
+          <span className={`uppercase ${statusTone(player.status)}`}>{player.status}</span>
+          <span className="text-emerald-100">C:{player.correctAnswers}</span>
+          <span className="text-rose-100">W:{player.wrongAnswers}</span>
+          <span className="text-amber-100">T:{player.timeoutAnswers ?? 0}</span>
+          <span className="text-cyan-100">S:{player.streak ?? 0}</span>
+          <span className="text-violet-100">{player.routeMode ?? "NORMAL"}</span>
+        </div>
+      </div>
+
+      <Track progress={progress} player={player} inactive={disconnected} />
+
+      <div className="text-right max-lg:text-left">
+        <p className="text-sm font-black text-cyan-100">{player.score} / {player.targetScore}</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-300">{Math.round(progress)}%</p>
+      </div>
+    </article>
+  );
+}
+
+function Track({ progress, player, inactive = false }: { progress: number; player?: TeacherPlayerView; inactive?: boolean }) {
+  const boundedProgress = clampProgress(progress);
+
+  return (
+    <div className="relative h-9 min-w-0">
+      <span className={`absolute left-0 top-1/2 z-10 h-8 w-0.5 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-600" : "bg-emerald-200"}`} />
+      <span className={`absolute right-0 top-1/2 z-10 h-8 w-0.5 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-600" : "bg-rose-200"}`} />
+      <span className={`absolute left-1 top-0 text-[8px] font-black uppercase tracking-[0.12em] ${inactive ? "text-slate-600" : "text-emerald-100/85"}`}>Start</span>
+      <span className={`absolute right-1 top-0 text-[8px] font-black uppercase tracking-[0.12em] ${inactive ? "text-slate-600" : "text-rose-100/85"}`}>Finish</span>
+      <div className={`absolute left-6 right-6 top-1/2 h-2 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-800/65" : "bg-slate-950/80"}`}>
+        <div className={`h-full rounded-full transition-[width] duration-300 ${inactive ? "bg-slate-700" : "bg-cyan-300/75"}`} style={{ width: `${boundedProgress}%` }} />
+      </div>
+      <div className={`absolute left-6 right-6 top-1/2 h-px -translate-y-1/2 ${inactive ? "bg-slate-600/35" : "bg-white/18"}`} />
+      {player ? (
+        <div className="absolute left-6 right-6 top-1/2 z-20 -translate-y-1/2">
+          <div
+            className="w-11 -translate-x-1/2 transition-[left] duration-300"
+            style={{ marginLeft: `${boundedProgress}%` }}
+          >
+            <TeacherCarIcon carId={player.carId} label={player.carName} className="drop-shadow-[0_7px_12px_rgba(0,0,0,0.4)]" />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

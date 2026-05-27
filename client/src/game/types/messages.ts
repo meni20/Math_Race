@@ -1,4 +1,5 @@
 export type RacePhase = "lobby" | "starting" | "active" | "finish";
+export type RoomLifecycleStatus = "WAITING" | "RACING" | "FINISHED" | "CLOSED" | "DELETED";
 export type TrackTheme = "sunny-forest" | "snow-peak" | "fun-world" | "grand_prix";
 export type CarId =
   | "bmw-m3"
@@ -13,6 +14,11 @@ export interface RoomSettings {
   maxPlayers: number;
   raceDurationSeconds: number;
   questionTimeLimitSeconds: number;
+  classGroup?: string;
+  difficulty?: "EASY" | "MEDIUM" | "HARD";
+  mapId?: TrackTheme;
+  targetScore: number;
+  operations?: "MIXED";
 }
 
 export interface JoinRoomRequest {
@@ -27,6 +33,8 @@ export interface ConnectPayload {
   playerId: string;
   displayName: string;
   carId?: CarId;
+  roomSettings?: Partial<RoomSettings>;
+  soloBotCount?: number;
 }
 
 export interface StartRaceRequest {
@@ -57,6 +65,7 @@ export interface AnswerSubmissionRequest {
   playerId: string;
   questionId: string;
   answer: string;
+  timeout?: boolean;
 }
 
 export interface DecisionChoiceRequest {
@@ -77,10 +86,21 @@ export interface PlayerSnapshot {
   finished: boolean;
   racePhase: RacePhase;
   carId?: CarId;
+  ready?: boolean;
+  connected?: boolean;
+  disconnectedAtMs?: number;
+  correctAnswers?: number;
+  wrongAnswers?: number;
+  timeoutAnswers?: number;
+  score?: number;
+  routeMode?: string;
+  streak?: number;
+  averageAnswerTimeMs?: number;
 }
 
 export interface GameStateUpdateMessage {
   roomId: string;
+  lifecycleStatus?: RoomLifecycleStatus;
   serverTimeMs: number;
   tick: number;
   racePhase: RacePhase;
@@ -99,9 +119,16 @@ export interface QuestionMessage {
   roomId: string;
   targetPlayerId: string;
   questionId: string;
+  id?: string;
+  kind?: string;
+  routeMode?: string;
+  operation?: string;
   prompt: string;
   difficulty: number;
+  difficultyLabel?: string;
   timeLimitMs: number;
+  timeLimitSeconds?: number;
+  createdAtMs?: number;
   expiresAtMs: number;
   highwayChallenge: boolean;
 }
@@ -120,4 +147,12 @@ export interface AnswerFeedbackMessage {
   targetPlayerId: string;
   accepted: boolean;
   correct: boolean;
+  resultType?: "CORRECT" | "WRONG" | "TIMEOUT";
+  feedback?: "correct" | "wrong" | "timeout";
+  pointsDelta?: number;
+  progressDelta?: number;
+  updatedProgress?: number;
+  streak?: number;
+  submittedAnswer?: string;
+  expectedAnswer?: number;
 }
