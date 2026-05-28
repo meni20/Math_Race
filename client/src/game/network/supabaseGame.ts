@@ -2,6 +2,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import { useGameStore } from "../store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 import { normalizeCarId } from "../utils/carSelection";
+import { DEFAULT_TARGET_SCORE } from "../utils/roomSettings";
 import type {
   AnswerFeedbackMessage,
   ConnectPayload,
@@ -15,7 +16,14 @@ import type {
   RoomJoinedMessage
 } from "../types/messages";
 import { getSupabaseTransportConfig } from "./transportConfig";
-import { recordNetworkRequest, startSyncLifecycle, stopSyncLifecycle, updateSyncLifecycle } from "../sync/syncLifecycle";
+import {
+  countNetworkRequests,
+  recordNetworkRequest,
+  startSyncLifecycle,
+  stopSyncLifecycle,
+  updateStudentRealtimeDebugState,
+  updateSyncLifecycle
+} from "../sync/syncLifecycle";
 
 interface GameErrorMessage {
   code?: string;
@@ -34,6 +42,15 @@ interface GameFunctionResponse {
 }
 
 type ResponseSource = "join" | "sync" | "submit-answer" | "action";
+
+const STUDENT_SYNC_INTERVALS_MS = {
+  waiting: 15000,
+  racing: 5000,
+  starting: 2000,
+  hidden: 30000,
+  maxBackoff: 30000
+};
+const STUDENT_REALTIME_STALE_MS = 45000;
 
 interface SessionPayload {
   roomId: string;
@@ -98,6 +115,9 @@ export class SupabaseGameClient {
   private nextSyncAtMs = 0;
   private lastStopReason = "";
   private terminalStatusReceived = false;
+  private realtimeConnected = false;
+  private lastRealtimeEventAtMs = 0;
+  private realtimeStatus = "idle";
 
   async connect(payload: ConnectPayload) {
     await this.disconnect();
@@ -278,11 +298,13 @@ export class SupabaseGameClient {
     });
     this.visibilityListener = () => {
       if (document.visibilityState === "visible") {
-        this.scheduleSync(generation, 0);
+        this.scheduleSync(generation, 0, true);
+      } else {
+        this.scheduleSync(generation, this.getFallbackSyncDelayMs());
       }
     };
     document.addEventListener("visibilitychange", this.visibilityListener);
-    this.scheduleSync(generation, this.getSyncIntervalMs());
+    this.scheduleSync(generation, this.getFallbackSyncDelayMs());
   }
 
   private stopSyncLoop(reason = "stopped") {
@@ -305,9 +327,10 @@ export class SupabaseGameClient {
     this.syncFailureCount = 0;
     this.lastStopReason = reason;
     this.nextSyncAtMs = 0;
+    updateStudentRealtimeDebugState({ syncFallbackActive: false });
   }
 
-  private scheduleSync(generation: number, delayMs: number) {
+  private scheduleSync(generation: number, delayMs: number, force = false) {
     if (generation !== this.syncGeneration || !this.getSessionPayload()) {
       return;
     }
@@ -316,28 +339,76 @@ export class SupabaseGameClient {
     }
     this.nextSyncAtMs = Date.now() + delayMs;
     updateSyncLifecycle(this.syncLifecycleId ?? 0, { nextSyncAtMs: this.nextSyncAtMs, intervalMs: delayMs });
+    updateStudentRealtimeDebugState({
+      syncFallbackActive: force || !this.isRealtimeHealthy(),
+      staleAtMs: this.lastRealtimeEventAtMs > 0 ? this.lastRealtimeEventAtMs + STUDENT_REALTIME_STALE_MS : 0
+    });
     this.syncTimerId = window.setTimeout(() => {
       this.syncTimerId = null;
-      void this.sync(generation);
+      void this.sync(generation, force);
     }, delayMs);
+  }
+
+  private getFallbackSyncDelayMs() {
+    if (this.isRealtimeHealthy()) {
+      return Math.max(0, (this.lastRealtimeEventAtMs + STUDENT_REALTIME_STALE_MS) - Date.now());
+    }
+    return this.getSyncIntervalMs();
   }
 
   private getSyncIntervalMs() {
     const state = useGameStore.getState();
     if (document.visibilityState === "hidden") {
-      return 10000;
+      return STUDENT_SYNC_INTERVALS_MS.hidden;
     }
     if (state.racePhase === "active") {
-      return 2000;
+      return STUDENT_SYNC_INTERVALS_MS.racing;
     }
     if (state.racePhase === "starting") {
-      return 1000;
+      return STUDENT_SYNC_INTERVALS_MS.starting;
     }
-    return 5000;
+    return STUDENT_SYNC_INTERVALS_MS.waiting;
   }
 
-  private shouldStopForLifecycle(status: RoomLifecycleStatus | undefined) {
-    return status === "CLOSED" || status === "DELETED";
+  private shouldStopForLifecycle(status: RoomLifecycleStatus | "REMOVED" | "KICKED" | undefined) {
+    return status === "CLOSED" || status === "DELETED" || status === "FINISHED" || status === "REMOVED" || status === "KICKED";
+  }
+
+  private isRealtimeHealthy() {
+    return this.realtimeConnected
+      && this.lastRealtimeEventAtMs > 0
+      && Date.now() - this.lastRealtimeEventAtMs < STUDENT_REALTIME_STALE_MS;
+  }
+
+  private markRealtimeHealthy(status: string) {
+    this.realtimeConnected = true;
+    this.realtimeStatus = status;
+    this.lastRealtimeEventAtMs = Date.now();
+    updateStudentRealtimeDebugState({
+      connected: true,
+      healthy: true,
+      status,
+      lastEventAtMs: this.lastRealtimeEventAtMs,
+      staleAtMs: this.lastRealtimeEventAtMs + STUDENT_REALTIME_STALE_MS,
+      syncFallbackActive: false
+    });
+    if (this.syncLifecycleId !== null) {
+      this.scheduleSync(this.syncGeneration, this.getFallbackSyncDelayMs());
+    }
+  }
+
+  private markRealtimeUnhealthy(status: string) {
+    this.realtimeConnected = false;
+    this.realtimeStatus = status;
+    updateStudentRealtimeDebugState({
+      connected: false,
+      healthy: false,
+      status,
+      syncFallbackActive: this.syncLifecycleId !== null
+    });
+    if (this.syncLifecycleId !== null) {
+      this.scheduleSync(this.syncGeneration, 0);
+    }
   }
 
   private subscribeToRoomChanges(roomId: string) {
@@ -357,23 +428,51 @@ export class SupabaseGameClient {
           const stateJson = (payload.new as { state_json?: GameRoomStateRecord }).state_json;
           const stateUpdate = this.stateRecordToUpdate(stateJson);
           if (stateUpdate) {
+            this.markRealtimeHealthy("UPDATE");
             useGameStore.getState().applyStateUpdate(stateUpdate);
+            if (this.shouldStopForLifecycle(stateUpdate.lifecycleStatus) || this.isLocalParticipantMissing(stateUpdate)) {
+              this.stopSyncLoop(stateUpdate.lifecycleStatus ?? "participant-missing");
+              if (this.isLocalParticipantMissing(stateUpdate)) {
+                useGameStore.getState().resetSession();
+                useGameStore.getState().setConnection("error", "You were removed from the room by the teacher.");
+              }
+              return;
+            }
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          this.markRealtimeHealthy(status);
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          this.markRealtimeUnhealthy(status);
+        }
+      });
   }
 
   private async unsubscribeFromRoomChanges() {
     const channel = this.roomChannel;
     this.roomChannel = null;
+    this.realtimeConnected = false;
+    this.realtimeStatus = "idle";
+    this.lastRealtimeEventAtMs = 0;
+    updateStudentRealtimeDebugState({
+      connected: false,
+      healthy: false,
+      status: "idle",
+      lastEventAtMs: 0,
+      staleAtMs: 0,
+      syncFallbackActive: false
+    });
     if (!channel || !this.client) {
       return;
     }
     await this.client.removeChannel(channel);
   }
 
-  private async sync(generation: number) {
+  private async sync(generation: number, force = false) {
     if (generation !== this.syncGeneration || this.syncInFlight) {
       return;
     }
@@ -382,11 +481,23 @@ export class SupabaseGameClient {
     if (!sessionPayload) {
       return;
     }
+    if (!force && this.isRealtimeHealthy()) {
+      this.scheduleSync(generation, this.getFallbackSyncDelayMs());
+      return;
+    }
 
     this.syncInFlight = true;
     this.syncAbortController = new AbortController();
     try {
       recordNetworkRequest("sync-room", "student");
+      if (import.meta.env.DEV && this.isRealtimeHealthy() && countNetworkRequests("sync-room") > 1) {
+        console.warn("[supabase] sync-room ran repeatedly while student Realtime was healthy", {
+          roomId: sessionPayload.roomId,
+          playerId: sessionPayload.playerId,
+          realtimeStatus: this.realtimeStatus,
+          lastRealtimeEventAtMs: this.lastRealtimeEventAtMs
+        });
+      }
       const response = await this.invoke("sync-room", sessionPayload, this.syncAbortController.signal);
       if (generation !== this.syncGeneration) {
         return;
@@ -423,11 +534,13 @@ export class SupabaseGameClient {
       this.syncAbortController = null;
       this.syncInFlight = false;
       if (generation === this.syncGeneration) {
-        const baseIntervalMs = this.getSyncIntervalMs();
-        const backoffMs = Math.min(15000, baseIntervalMs * Math.max(1, this.syncFailureCount + 1));
+        const baseIntervalMs = this.getFallbackSyncDelayMs();
+        const backoffMs = this.isRealtimeHealthy()
+          ? baseIntervalMs
+          : Math.min(STUDENT_SYNC_INTERVALS_MS.maxBackoff, baseIntervalMs * Math.max(1, this.syncFailureCount + 1));
         if (import.meta.env.DEV) {
           const state = useGameStore.getState();
-          if ((state.racePhase === "lobby" || state.racePhase === "starting") && state.racePhase !== "starting" && backoffMs < 4000) {
+          if ((state.racePhase === "lobby" || state.racePhase === "starting") && state.racePhase !== "starting" && backoffMs < STUDENT_SYNC_INTERVALS_MS.waiting) {
             console.warn("BUG: student waiting polling interval too aggressive", {
               intervalMs: backoffMs,
               roomId: state.roomId,
@@ -496,7 +609,9 @@ export class SupabaseGameClient {
       winnerPlayerId: record.winnerPlayerId ?? "",
       roomCreatorPlayerId: record.roomCreatorPlayerId ?? "",
       roomSettings: record.roomSettings ?? state.roomSettings,
-      trackLengthMeters: Number.isFinite(record.trackLengthMeters) ? Math.max(1, record.trackLengthMeters ?? state.trackLengthMeters) : state.trackLengthMeters,
+      trackLengthMeters: Number.isFinite(record.trackLengthMeters)
+        ? Math.max(1, record.trackLengthMeters ?? state.trackLengthMeters)
+        : Math.max(1, Math.trunc((record.roomSettings ?? state.roomSettings).targetScore ?? DEFAULT_TARGET_SCORE)),
       players
     };
   }
@@ -602,8 +717,18 @@ export class SupabaseGameClient {
       }
     }
 
-    if (response.answerFeedback) {
+    if (response.answerFeedback && source !== "sync") {
       store.applyAnswerFeedback(response.answerFeedback);
+    }
+
+    if (this.shouldStopForLifecycle(response.stateUpdate?.lifecycleStatus) || this.isLocalParticipantMissing(response.stateUpdate)) {
+      const stopReason = response.stateUpdate?.lifecycleStatus ?? "participant-missing";
+      this.terminalStatusReceived = this.shouldStopForLifecycle(response.stateUpdate?.lifecycleStatus);
+      this.stopSyncLoop(stopReason);
+      if (this.isLocalParticipantMissing(response.stateUpdate)) {
+        store.resetSession();
+        store.setConnection("error", "You were removed from the room by the teacher.");
+      }
     }
 
     return true;
@@ -618,6 +743,10 @@ export class SupabaseGameClient {
       nextSyncAtMs: this.nextSyncAtMs,
       lastStopReason: this.lastStopReason,
       terminalStatusReceived: this.terminalStatusReceived,
+      realtimeConnected: this.realtimeConnected,
+      realtimeHealthy: this.isRealtimeHealthy(),
+      realtimeStatus: this.realtimeStatus,
+      lastRealtimeEventAtMs: this.lastRealtimeEventAtMs,
       roomId: state.roomId,
       roomStatus: state.roomRacePhase,
       participantId: state.playerId,

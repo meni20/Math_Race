@@ -268,7 +268,8 @@ function advanceClassroomRenderedPlayer(
   deltaSeconds: number,
   isLocalPlayer: boolean,
   answerFeedback: ClassroomAnswerFeedbackMotion | null | undefined,
-  nowMs: number
+  nowMs: number,
+  raceStopped: boolean
 ) {
   const authoritativeScorePosition = Math.max(
     0,
@@ -277,18 +278,24 @@ function advanceClassroomRenderedPlayer(
   const previousPosition = previousPlayer
     ? Math.max(previousPlayer.positionMeters, authoritativeScorePosition)
     : authoritativeScorePosition;
+  const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
+  if (terminal) {
+    return {
+      ...targetPlayer,
+      positionMeters: previousPosition,
+      speedMps: 0
+    };
+  }
+
   const modifierKmh = isLocalPlayer ? getClassroomModifierKmh(answerFeedback, nowMs) : 0;
   const visualSpeedMps = Math.max(0, kmhToMps(CLASSROOM_BASE_SPEED_KMH + modifierKmh));
   const advancedPosition = previousPosition + (visualSpeedMps * Math.max(0, deltaSeconds));
-  const finishedPosition = targetPlayer.finished
-    ? Math.max(advancedPosition, targetPlayer.positionMeters)
-    : advancedPosition;
 
   return {
     ...targetPlayer,
-    lap: targetPlayer.finished ? targetPlayer.lap : 0,
-    positionMeters: Math.max(previousPosition, finishedPosition),
-    speedMps: targetPlayer.finished ? 0 : visualSpeedMps
+    lap: 0,
+    positionMeters: Math.max(previousPosition, advancedPosition),
+    speedMps: visualSpeedMps
   };
 }
 
@@ -401,7 +408,8 @@ export function advanceRenderedPlayers({
         deltaSeconds,
         currentPlayerId === localPlayerId,
         answerFeedback,
-        nowMs
+        nowMs,
+        raceStopped
       );
       continue;
     }

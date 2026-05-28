@@ -24,7 +24,7 @@ Deno.serve(async (request) => {
         maxPlayers: 8,
         raceDurationSeconds: 180,
         questionTimeLimitSeconds: 15,
-        targetScore: 500,
+        targetScore: 300,
         operations: "MIXED"
       }
     };

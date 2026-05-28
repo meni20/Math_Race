@@ -6,9 +6,9 @@ const MIN_RACE_DURATION_SECONDS = 60;
 const MAX_RACE_DURATION_SECONDS = 600;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
 const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
-const DEFAULT_TARGET_SCORE = 500;
-const MIN_TARGET_SCORE = 100;
-const MAX_TARGET_SCORE = 5000;
+export const DEFAULT_TARGET_SCORE = 300;
+export const MIN_TARGET_SCORE = 50;
+export const MAX_TARGET_SCORE = 10000;
 
 function clampInteger(value: number, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) {

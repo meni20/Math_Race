@@ -71,7 +71,7 @@ const ANSWER_RATE_LIMIT_MS = 75;
 const DECISION_RATE_LIMIT_MS = 120;
 const MAX_ADVANCE_STEP_MS = 250;
 const SYNC_PRESENCE_HEARTBEAT_MS = 5000;
-const DEFAULT_TRACK_LENGTH_METERS = 3000;
+const DEFAULT_TRACK_LENGTH_METERS = 300;
 const DEFAULT_TOTAL_LAPS = 1;
 const RACE_START_COUNTDOWN_MS = 2600;
 const HIGHWAY_CHOICE = "HIGHWAY";
@@ -85,9 +85,9 @@ const MAX_RACE_DURATION_SECONDS = 600;
 const DEFAULT_QUESTION_TIME_LIMIT_SECONDS = 8;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
 const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
-const DEFAULT_TARGET_SCORE = 500;
-const MIN_TARGET_SCORE = 100;
-const MAX_TARGET_SCORE = 5000;
+const DEFAULT_TARGET_SCORE = 300;
+const MIN_TARGET_SCORE = 50;
+const MAX_TARGET_SCORE = 10000;
 
 type PresenceByPlayerId = Record<string, GameRoomPresenceRecord>;
 
@@ -266,6 +266,11 @@ function hydrateRoomSetup(room: GameRoomStateRecord) {
   );
 
   room.roomCreatorPlayerId = room.teacherSessionId ? null : pickRoomHost(room);
+  if (room.teacherSessionId) {
+    room.targetScore = room.roomSettings.targetScore;
+    room.trackLengthMeters = room.targetScore;
+    room.totalLaps = 1;
+  }
 
   return previousCreatorPlayerId !== room.roomCreatorPlayerId
     || !areRoomSettingsEqual(previousRoomSettings, room.roomSettings);
@@ -697,6 +702,10 @@ function stopRace(room: GameRoomStateRecord, winner: PlayerStateRecord, now: num
   room.endedAtMs = now;
   room.winnerPlayerId = winner.playerId;
   room.resultHistoryId = room.resultHistoryId ?? buildHistoryId(room.roomId, room.raceStartedAtMs);
+  if (room.teacherSessionId) {
+    room.isListed = false;
+    room.isLocked = true;
+  }
 
   for (const player of Object.values(room.players)) {
     if (player.racePhase === "active" || player.racePhase === "starting") {
@@ -978,6 +987,7 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
     winnerPlayerId: room.winnerPlayerId,
     roomCreatorPlayerId: room.teacherSessionId ? "" : (pickRoomHost(room) ?? ""),
     roomSettings: room.roomSettings,
+    trackLengthMeters: room.trackLengthMeters,
     players
   };
 }
@@ -1419,7 +1429,9 @@ function getPlayerProgressMeters(room: GameRoomStateRecord, player: PlayerStateR
 }
 
 function setPlayerProgressMeters(room: GameRoomStateRecord, player: PlayerStateRecord, progressMeters: number) {
-  const finishThreshold = Math.max(1, Math.trunc(room.targetScore ?? room.roomSettings.targetScore ?? room.trackLengthMeters * room.totalLaps));
+  const finishThreshold = room.teacherSessionId
+    ? Math.max(1, Math.trunc(room.targetScore ?? room.roomSettings.targetScore ?? DEFAULT_TARGET_SCORE))
+    : Math.max(1, Math.trunc(room.trackLengthMeters * room.totalLaps));
   const clamped = Math.max(0, Math.min(finishThreshold, sanitizeFinite(progressMeters, 0)));
   if (room.teacherSessionId) {
     player.score = Math.trunc(clamped);
@@ -1654,6 +1666,10 @@ export function submitAnswer(
   if (player.finished && !room.raceStopped) {
     stopRace(room, player, now);
   }
+  const terminalClassroomFinish = Boolean(
+    room.teacherSessionId
+    && (room.raceStopped || room.racePhase === "finish" || player.finished || roomLifecycleStatus(room) === "FINISHED")
+  );
 
   const prompt = currentPrompt(room, player, now);
   const answerEvent = resultType === "CORRECT"
@@ -1664,7 +1680,7 @@ export function submitAnswer(
   return {
     persist: true,
     room,
-    skipClassroomSync: true,
+    skipClassroomSync: !terminalClassroomFinish,
     roomEvents: [
       {
         eventType: answerEvent,
@@ -1896,6 +1912,21 @@ export function returnPlayerToLobby(
       room,
       presenceDeletes: advanceResult.presenceDeletes,
       response: rejectUnauthorized(room.roomId, request.playerId)
+    };
+  }
+
+  if (room.teacherSessionId && (room.endedAtMs || room.raceStopped || room.racePhase === "finish")) {
+    room.isListed = false;
+    room.isLocked = true;
+    room.endedAtMs = room.endedAtMs || now;
+    touchSession(player, now);
+    room.lastInteractionAtMs = now;
+    return {
+      persist: true,
+      room,
+      presenceDeletes: advanceResult.presenceDeletes,
+      presenceUpserts: [buildPresenceUpsert(room.roomId, player.playerId, request.sessionId, now)],
+      response: buildResponseForPlayer(room, player, now)
     };
   }
 

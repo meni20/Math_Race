@@ -124,6 +124,7 @@ export interface GameStateUpdateMessage {
   winnerPlayerId: string | null;
   roomCreatorPlayerId: string;
   roomSettings: RoomSettings;
+  trackLengthMeters?: number;
   players: PlayerSnapshot[];
 }
 

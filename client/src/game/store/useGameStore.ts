@@ -18,7 +18,7 @@ import {
   type PlayerSyncMeta
 } from "../utils/renderMotion";
 import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
-import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
+import { DEFAULT_TARGET_SCORE, buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 import { DEFAULT_CAR_ID, normalizeCarId } from "../utils/carSelection";
 
 const MAX_LANE_INDEX = 7;
@@ -112,7 +112,7 @@ const initialState = {
   roomSettings: buildDefaultRoomSettings(""),
   trackTheme: "sunny-forest" as TrackTheme,
   selectedCarId: DEFAULT_CAR_ID,
-  trackLengthMeters: 3000,
+  trackLengthMeters: DEFAULT_TARGET_SCORE,
   totalLaps: 1,
   latestTick: 0,
   players: {} as Record<string, PlayerSnapshot>,
@@ -210,7 +210,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       );
       const trackLengthMeters = Number.isFinite(message.trackLengthMeters)
         ? Math.max(1, message.trackLengthMeters ?? state.trackLengthMeters)
-        : state.trackLengthMeters;
+        : roomCreatorPlayerId === ""
+          ? Math.max(1, Math.trunc(roomSettings.targetScore ?? DEFAULT_TARGET_SCORE))
+          : state.trackLengthMeters;
       const playersById: Record<string, PlayerSnapshot> = {};
       const playerSyncMeta: Record<string, PlayerSyncMeta> = {};
       for (const player of message.players) {

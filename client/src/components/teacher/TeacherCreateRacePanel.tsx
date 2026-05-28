@@ -73,16 +73,17 @@ export function TeacherCreateRacePanel({ config, connecting, disabledReason, onC
           </label>
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/70">Target points to win</span>
-            <select
+            <input
+              type="number"
+              inputMode="numeric"
+              min={50}
+              max={10000}
+              step={1}
+              placeholder="300"
               className="w-full rounded-lg border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-100/40"
               value={config.targetScore}
-              onChange={(event) => update({ targetScore: Number(event.target.value) })}
-            >
-              <option value={300}>300 quick race</option>
-              <option value={500}>500 normal race</option>
-              <option value={1000}>1000 long race</option>
-              <option value={1500}>1500 challenge</option>
-            </select>
+              onChange={(event) => update({ targetScore: Math.trunc(Number(event.target.value) || 300) })}
+            />
           </label>
         </div>
 

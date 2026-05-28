@@ -93,18 +93,19 @@ export function Hud() {
   const localSpeedKmh = localPlayer ? toKmh(localPlayer.speedMps) : 0;
   const localScore = Math.max(0, Math.trunc(localPlayer?.score ?? 0));
   const targetScore = Math.max(1, Math.trunc(roomSettings.targetScore ?? trackLengthMeters));
-
-  const displayedLap = localPlayer
-    ? Math.min(totalLaps, localPlayer.finished ? totalLaps : localPlayer.lap + 1)
-    : 1;
-  const distanceToFinishGateMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
-  const lapsRemainingToFinish = localPlayer
-    ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
-    : Math.max(0, totalLaps - 1);
-  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
-  const raceElapsedMs = raceStartedAtMs
+  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
+  const raceElapsedMs = !isClassroomSession && raceStartedAtMs
     ? Math.max(0, (raceFinishedAtMs ?? nowMs) - raceStartedAtMs)
     : 0;
+  const distanceToFinishGateMeters = !isClassroomSession
+    ? getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps)
+    : 0;
+  const lapsRemainingToFinish = !isClassroomSession
+    ? localPlayer
+      ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
+      : Math.max(0, totalLaps - 1)
+    : 0;
+  const finalLapActive = !isClassroomSession && isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
   const standings = useMemo(() => {
     return playerIds
       .map((currentPlayerId) => players[currentPlayerId])
@@ -128,7 +129,6 @@ export function Hud() {
   if (connection !== "connected" || !roomId || racePhase !== "active") {
     return null;
   }
-  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   return (
     <>
@@ -186,23 +186,25 @@ export function Hud() {
         </>
       ) : null}
 
-      <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} />
+      {!isClassroomSession ? <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} /> : null}
 
-      <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
-        <p className="font-semibold text-slate-50">Score {localScore}/{targetScore}</p>
-        {sessionMode === "solo" ? (
-          <p className="mt-1 text-amber-100/90">{localPlayer?.finished ? "Target reached" : `${Math.max(0, targetScore - localScore)} pts to finish`}</p>
-        ) : (
-          <p className="mt-1 text-amber-100/90">
-            {localPlayer?.finished
-              ? "Finish gate crossed"
-              : finalLapActive
-                ? `Finish: ${formatDistance(distanceToFinishGateMeters)}`
-                : `Opens in ${lapsRemainingToFinish} lap${lapsRemainingToFinish === 1 ? "" : "s"}`}
-          </p>
-        )}
-        <p className="mt-1 text-cyan-100/80">Race {formatClock(raceElapsedMs)}</p>
-      </section>
+      {!isClassroomSession ? (
+        <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
+          <p className="font-semibold text-slate-50">Score {localScore}/{targetScore}</p>
+          {sessionMode === "solo" ? (
+            <p className="mt-1 text-amber-100/90">{localPlayer?.finished ? "Target reached" : `${Math.max(0, targetScore - localScore)} pts to finish`}</p>
+          ) : (
+            <p className="mt-1 text-amber-100/90">
+              {localPlayer?.finished
+                ? "Finish gate crossed"
+                : finalLapActive
+                  ? `Finish: ${formatDistance(distanceToFinishGateMeters)}`
+                  : `Opens in ${lapsRemainingToFinish} lap${lapsRemainingToFinish === 1 ? "" : "s"}`}
+            </p>
+          )}
+          <p className="mt-1 text-cyan-100/80">Race {formatClock(raceElapsedMs)}</p>
+        </section>
+      ) : null}
 
       {feedback && nowMs - feedback.receivedAtMs < 1200 ? (
         <section

@@ -192,7 +192,7 @@ export function TeacherDashboard() {
   const roomIsTerminal = snapshot?.lifecycleStatus === "CLOSED" || snapshot?.lifecycleStatus === "DELETED";
   const hasStartableStudents = activePlayers.length > 0;
   const canStart = Boolean(snapshot && !roomIsTerminal && snapshot.racePhase === "lobby" && hasStartableStudents);
-  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore ?? 500} pts` : `${config.targetScore} pts`;
+  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore} pts` : `${config.targetScore} pts`;
 
   const createRace = async () => {
     if (adapterInfo.mode === "unavailable") {
@@ -392,6 +392,7 @@ export function TeacherDashboard() {
                   <>
                     <span>Teacher transport: {liveDebug?.transportState ?? "idle"}</span>
                     <span>SSE connected: {liveDebug?.sseConnected ? "true" : "false"}</span>
+                    <span>SSE healthy: {liveDebug?.sseHealthy ? "true" : "false"}</span>
                     <span>Polling fallback active: {liveDebug?.teacherPollingActive ? "true" : "false"}</span>
                     <span>Fallback interval: {liveDebug?.fallbackIntervalMs ?? 0}ms</span>
                     <span>Last SSE event: {liveDebug?.lastSseEventType || "none"}</span>
@@ -404,6 +405,7 @@ export function TeacherDashboard() {
                     <span>teacher-sync-room last 60s: {syncDebug.requestCountsLast60s.teacherSyncRoom}</span>
                     <span>blocked teacher-sync-room last 60s: {syncDebug.requestCountsLast60s.teacherSyncRoomBlocked}</span>
                     <span>list-teacher-rooms last 60s: {syncDebug.requestCountsLast60s.listTeacherRooms}</span>
+                    <span>Active polling timers: {syncDebug.activePollingTimersCount}</span>
                   </>
                 );
               })()}

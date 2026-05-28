@@ -1,7 +1,7 @@
 import type { PlayerSnapshot, RoomSettings, TrackTheme } from "../../game/types/messages";
 import { getGarageCarById } from "../../game/utils/carCatalog";
 import { normalizeRoomId } from "../../game/utils/gameIds";
-import { normalizeRoomSettings } from "../../game/utils/roomSettings";
+import { DEFAULT_TARGET_SCORE, MAX_TARGET_SCORE, MIN_TARGET_SCORE, normalizeRoomSettings } from "../../game/utils/roomSettings";
 import type { TeacherPlayerStatus, TeacherPlayerView, TeacherRaceConfig } from "./teacherTypes";
 
 export const TRACK_THEME_LABELS: Record<TrackTheme, string> = {
@@ -17,7 +17,7 @@ export const DEFAULT_TEACHER_CONFIG: TeacherRaceConfig = {
   roomCode: "",
   trackTheme: "sunny-forest",
   difficulty: "MEDIUM",
-  targetScore: 500
+  targetScore: DEFAULT_TARGET_SCORE
 };
 
 export function buildRandomId(prefix: string) {
@@ -74,14 +74,9 @@ export function configToRoomSettings(config: TeacherRaceConfig): RoomSettings {
   });
 }
 
-export function getRaceProgress(player: PlayerSnapshot, trackLengthMeters: number, totalLaps: number) {
-  if (typeof player.score === "number" && trackLengthMeters > 0) {
-    return Math.max(0, Math.min(100, (Math.max(0, player.score) / trackLengthMeters) * 100));
-  }
-  const safeTrackLength = Math.max(1, trackLengthMeters);
-  const safeTotalLaps = Math.max(1, totalLaps);
-  const completedDistance = (Math.max(0, player.lap) * safeTrackLength) + Math.max(0, player.positionMeters);
-  return Math.max(0, Math.min(100, (completedDistance / (safeTrackLength * safeTotalLaps)) * 100));
+export function getRaceProgress(player: PlayerSnapshot, targetScore: number) {
+  const safeTargetScore = Math.max(1, Math.trunc(targetScore || DEFAULT_TARGET_SCORE));
+  return Math.max(0, Math.min(100, (Math.max(0, Math.trunc(player.score ?? 0)) / safeTargetScore) * 100));
 }
 
 export function getTeacherPlayerStatus(player: PlayerSnapshot, localStatus?: TeacherPlayerStatus): TeacherPlayerStatus {
@@ -105,12 +100,12 @@ export function getTeacherPlayerStatus(player: PlayerSnapshot, localStatus?: Tea
 
 export function buildTeacherPlayers(
   players: PlayerSnapshot[],
-  trackLengthMeters: number,
-  totalLaps: number,
+  targetScore: number,
   statuses: Record<string, TeacherPlayerStatus>
 ): TeacherPlayerView[] {
+  const safeTargetScore = Math.max(1, Math.trunc(targetScore || DEFAULT_TARGET_SCORE));
   return [...players]
-    .sort((left, right) => getRaceProgress(right, trackLengthMeters, totalLaps) - getRaceProgress(left, trackLengthMeters, totalLaps))
+    .sort((left, right) => getRaceProgress(right, safeTargetScore) - getRaceProgress(left, safeTargetScore))
     .map((player, index) => {
       const car = getGarageCarById(player.carId);
       return {
@@ -120,13 +115,13 @@ export function buildTeacherPlayers(
         carName: car.name,
         carColor: car.accentColor,
         status: getTeacherPlayerStatus(player, statuses[player.playerId]),
-        progressPercent: getRaceProgress(player, trackLengthMeters, totalLaps),
+        progressPercent: getRaceProgress(player, safeTargetScore),
         rank: index + 1,
         correctAnswers: Math.max(0, Math.trunc(player.correctAnswers ?? 0)),
         wrongAnswers: Math.max(0, Math.trunc(player.wrongAnswers ?? 0)),
         timeoutAnswers: Math.max(0, Math.trunc(player.timeoutAnswers ?? 0)),
         score: Math.max(0, Math.trunc(player.score ?? 0)),
-        targetScore: Math.max(1, Math.trunc(trackLengthMeters)),
+        targetScore: safeTargetScore,
         routeMode: player.routeMode,
         connected: player.connected !== false,
         streak: Math.max(0, Math.trunc(player.streak ?? 0)),
@@ -142,7 +137,7 @@ export function normalizeTeacherConfig(config: TeacherRaceConfig): TeacherRaceCo
     roomCode,
     raceName: config.raceName.trim() || DEFAULT_TEACHER_CONFIG.raceName,
     classGroup: config.classGroup.trim() || DEFAULT_TEACHER_CONFIG.classGroup,
-    targetScore: Math.max(100, Math.min(5000, Math.trunc(config.targetScore || DEFAULT_TEACHER_CONFIG.targetScore)))
+    targetScore: Math.max(MIN_TARGET_SCORE, Math.min(MAX_TARGET_SCORE, Math.trunc(config.targetScore || DEFAULT_TEACHER_CONFIG.targetScore)))
   };
 }
 

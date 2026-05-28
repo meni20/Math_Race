@@ -11,7 +11,7 @@ import type {
   RoomSettings,
   RoomJoinedMessage
 } from "../types/messages";
-import { buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
+import { DEFAULT_TARGET_SCORE, buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 import { getRandomCarId, normalizeCarId } from "../utils/carSelection";
 import {
   localRoomToStateUpdate,
@@ -98,11 +98,11 @@ function clampSpeed(speedMps: number) {
 }
 
 function calculateDynamicTrackLengthMeters(roomSettings: RoomSettings) {
-  return Math.max(MIN_DYNAMIC_TRACK_LENGTH_METERS, Math.trunc(roomSettings.targetScore ?? 500) * 12);
+  return Math.max(MIN_DYNAMIC_TRACK_LENGTH_METERS, Math.trunc(roomSettings.targetScore ?? DEFAULT_TARGET_SCORE) * 12);
 }
 
 function getTargetScore(session: DemoSession) {
-  return Math.max(1, Math.trunc(session.roomSettings.targetScore ?? 500));
+  return Math.max(1, Math.trunc(session.roomSettings.targetScore ?? DEFAULT_TARGET_SCORE));
 }
 
 export function normalizeSoloBotCount(value: number) {

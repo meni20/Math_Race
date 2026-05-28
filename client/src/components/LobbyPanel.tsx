@@ -1,15 +1,16 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TrackTheme } from "../game/types/messages";
 import { gameSocket } from "../game/network/gameSocket";
 import { StudentClassroomHud } from "./StudentClassroomHud";
 import { getClassroomAdapterInfo, getClassroomRoomService, listActiveClassroomRooms, type ClassroomRoomSummary } from "../game/network/classroomRooms";
 import { isDemoTransportConfigured } from "../game/network/transportConfig";
 import { useGameStore } from "../game/store/useGameStore";
-import { getActiveSyncDebugState } from "../game/sync/syncLifecycle";
+import { getActiveSyncDebugState, updateActiveClassroomListDebugState } from "../game/sync/syncLifecycle";
 import { GARAGE_CARS } from "../game/utils/carCatalog";
 import { normalizeRoomId } from "../game/utils/gameIds";
 import {
   areRoomSettingsEqual,
+  DEFAULT_TARGET_SCORE,
   MAX_ROOM_PLAYERS,
   normalizeRoomSettings
 } from "../game/utils/roomSettings";
@@ -112,6 +113,10 @@ export function LobbyPanel() {
   const [soloBotCount, setSoloBotCount] = useState(2);
   const [soloDifficulty, setSoloDifficulty] = useState<"EASY" | "MEDIUM" | "HARD">("MEDIUM");
   const [soloTargetScore, setSoloTargetScore] = useState(500);
+  const activeListInFlightRef = useRef(false);
+  const activeListGenerationRef = useRef(0);
+  const joinBoxOpenRef = useRef(joinBoxOpen);
+  const isClassroomSessionRef = useRef(false);
   const connecting = connection === "connecting";
   const connected = connection === "connected";
   const demoMode = isDemoTransportConfigured();
@@ -120,6 +125,7 @@ export function LobbyPanel() {
   const isActiveRace = connected && racePhase === "active";
   const isSharedSession = sessionMode === "shared";
   const isClassroomSession = isSharedSession && roomCreatorPlayerId === "";
+  const shouldRefreshActiveClassrooms = joinBoxOpen && !isClassroomSession;
   const localPlayer = playerId ? players[playerId] : undefined;
   const syncDebug = import.meta.env.DEV ? getActiveSyncDebugState() : null;
   const studentSyncDebug = syncDebug?.active.find((entry) => entry.role === "student");
@@ -154,30 +160,100 @@ export function LobbyPanel() {
     return () => window.clearInterval(intervalId);
   }, [racePhase]);
 
-  const refreshActiveClassrooms = () => {
-    return listActiveClassroomRooms()
+  useEffect(() => {
+    joinBoxOpenRef.current = joinBoxOpen;
+  }, [joinBoxOpen]);
+
+  useEffect(() => {
+    isClassroomSessionRef.current = isClassroomSession;
+  }, [isClassroomSession]);
+
+  const refreshActiveClassrooms = useCallback((manual = false) => {
+    if (!joinBoxOpenRef.current || isClassroomSessionRef.current || activeListInFlightRef.current) {
+      return Promise.resolve();
+    }
+
+    const requestGeneration = activeListGenerationRef.current;
+    activeListInFlightRef.current = true;
+    updateActiveClassroomListDebugState({
+      panelOpen: true,
+      inClassroomRoom: isClassroomSessionRef.current,
+      visible: document.visibilityState === "visible",
+      inFlight: true,
+      pollingActive: false,
+      activePollingTimers: 0,
+      nextRefreshAtMs: 0
+    });
+
+    return listActiveClassroomRooms({ panelOpen: true, inClassroomRoom: isClassroomSessionRef.current, manual })
       .then((rooms) => {
+        if (requestGeneration !== activeListGenerationRef.current || !joinBoxOpenRef.current || isClassroomSessionRef.current) {
+          return;
+        }
         setActiveLobbies(rooms);
         setActiveLobbyError("");
       })
       .catch((error) => {
+        if (requestGeneration !== activeListGenerationRef.current || !joinBoxOpenRef.current || isClassroomSessionRef.current) {
+          return;
+        }
         setActiveLobbies([]);
         setActiveLobbyError(error instanceof Error ? error.message : "Unable to load active classrooms.");
+      })
+      .finally(() => {
+        if (requestGeneration === activeListGenerationRef.current) {
+          activeListInFlightRef.current = false;
+          updateActiveClassroomListDebugState({
+            inFlight: false,
+            lastRefreshAtMs: Date.now(),
+            pollingActive: false,
+            activePollingTimers: 0,
+            nextRefreshAtMs: 0
+          });
+        }
       });
-  };
+  }, []);
 
   useEffect(() => {
-    if (!joinBoxOpen) {
+    if (!shouldRefreshActiveClassrooms) {
+      activeListGenerationRef.current += 1;
+      activeListInFlightRef.current = false;
+      updateActiveClassroomListDebugState({
+        panelOpen: joinBoxOpen,
+        inClassroomRoom: isClassroomSession,
+        visible: document.visibilityState === "visible",
+        inFlight: false,
+        pollingActive: false,
+        activePollingTimers: 0,
+        nextRefreshAtMs: 0
+      });
       return undefined;
     }
-    void refreshActiveClassrooms();
-    const intervalId = window.setInterval(() => {
-      void refreshActiveClassrooms();
-    }, 3000);
+
+    activeListGenerationRef.current += 1;
+    updateActiveClassroomListDebugState({
+      panelOpen: true,
+      inClassroomRoom: false,
+      visible: document.visibilityState === "visible",
+      pollingActive: false,
+      activePollingTimers: 0,
+      nextRefreshAtMs: 0
+    });
+    void refreshActiveClassrooms(false);
+
     return () => {
-      window.clearInterval(intervalId);
+      activeListGenerationRef.current += 1;
+      activeListInFlightRef.current = false;
+      updateActiveClassroomListDebugState({
+        panelOpen: false,
+        inClassroomRoom: isClassroomSessionRef.current,
+        inFlight: false,
+        pollingActive: false,
+        activePollingTimers: 0,
+        nextRefreshAtMs: 0
+      });
     };
-  }, [joinBoxOpen]);
+  }, [isClassroomSession, joinBoxOpen, refreshActiveClassrooms, shouldRefreshActiveClassrooms]);
 
   const badgeClass = useMemo(() => {
     if (connection === "connected") {
@@ -406,7 +482,7 @@ export function LobbyPanel() {
           playerName={classroomPlayerName}
           position={localRank}
           score={Math.max(0, Math.trunc(localPlayer?.score ?? 0))}
-          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? 500))}
+          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? DEFAULT_TARGET_SCORE))}
           onLeave={onExitRace}
         />
       );
@@ -437,7 +513,7 @@ export function LobbyPanel() {
           playerName={classroomPlayerName}
           position={localRank}
           score={Math.max(0, Math.trunc(localPlayer?.score ?? 0))}
-          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? 500))}
+          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? DEFAULT_TARGET_SCORE))}
           status={classroomHudStatus}
           onLeave={onLeaveRoom}
         />
@@ -690,7 +766,7 @@ export function LobbyPanel() {
                 <button
                   type="button"
                   onClick={() => {
-                    void refreshActiveClassrooms();
+                    void refreshActiveClassrooms(true);
                   }}
                   aria-label="Refresh classrooms"
                   title="Refresh classrooms"
@@ -820,6 +896,15 @@ export function LobbyPanel() {
             <div className="mt-2 grid gap-1">
               <span>Student sync active: {studentSyncDebug ? "true" : "false"}</span>
               <span>sync-room last 60s: {syncDebug?.requestCountsLast60s.syncRoom ?? 0}</span>
+              <span>list-active-classroom-rooms last 60s: {syncDebug?.requestCountsLast60s.listActiveClassroomRooms ?? 0}</span>
+              <span>Active list polling: {syncDebug?.activeClassroomList.pollingActive ? "true" : "false"}</span>
+              <span>Active list in flight: {syncDebug?.activeClassroomList.inFlight ? "true" : "false"}</span>
+              <span>Active list in classroom: {syncDebug?.activeClassroomList.inClassroomRoom ? "true" : "false"}</span>
+              <span>Student realtime healthy: {syncDebug?.studentRealtime.healthy ? "true" : "false"}</span>
+              <span>Student sync fallback active: {syncDebug?.studentRealtime.syncFallbackActive ? "true" : "false"}</span>
+              <span>Last active list: {syncDebug?.activeClassroomList.lastRefreshAtMs ? new Date(syncDebug.activeClassroomList.lastRefreshAtMs).toLocaleTimeString() : "never"}</span>
+              <span>Next active list: {syncDebug?.activeClassroomList.nextRefreshAtMs ? new Date(syncDebug.activeClassroomList.nextRefreshAtMs).toLocaleTimeString() : "none"}</span>
+              <span>Active polling timers: {syncDebug?.activePollingTimersCount ?? 0}</span>
               <span>Current interval: {studentSyncDebug?.intervalMs ?? 0}ms</span>
               <span>Next sync: {studentSyncDebug?.nextSyncAtMs ? new Date(studentSyncDebug.nextSyncAtMs).toLocaleTimeString() : "none"}</span>
               <span>Room: {roomId || "none"} / {roomRacePhase}</span>

@@ -43,7 +43,9 @@ export function FinishOverlay() {
   const racePlacement = useGameStore((state) => state.racePlacement);
   const raceStopped = useGameStore((state) => state.raceStopped);
   const winnerPlayerId = useGameStore((state) => state.winnerPlayerId);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
   const { players } = useRenderedPlayers();
+  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   const localPlayer = playerId ? players[playerId] : undefined;
   const winnerName = winnerPlayerId && players[winnerPlayerId] ? players[winnerPlayerId].displayName : undefined;
@@ -56,12 +58,23 @@ export function FinishOverlay() {
         if (scoreDelta !== 0) {
           return scoreDelta;
         }
+        if (isClassroomSession) {
+          const correctDelta = Math.max(0, Math.trunc(b.correctAnswers ?? 0)) - Math.max(0, Math.trunc(a.correctAnswers ?? 0));
+          if (correctDelta !== 0) {
+            return correctDelta;
+          }
+          const wrongDelta = Math.max(0, Math.trunc(a.wrongAnswers ?? 0)) - Math.max(0, Math.trunc(b.wrongAnswers ?? 0));
+          if (wrongDelta !== 0) {
+            return wrongDelta;
+          }
+          return Math.max(0, Math.trunc(a.timeoutAnswers ?? 0)) - Math.max(0, Math.trunc(b.timeoutAnswers ?? 0));
+        }
         return (
           getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
           - getPlayerRaceDistanceMeters(a, trackLengthMeters, totalLaps)
         );
       });
-  }, [players, totalLaps, trackLengthMeters]);
+  }, [isClassroomSession, players, totalLaps, trackLengthMeters]);
 
   if (!raceStopped || !localPlayer || !raceFinishedAtMs || raceStartedAtMs <= 0) {
     return null;
@@ -70,6 +83,10 @@ export function FinishOverlay() {
   const elapsedMs = Math.max(0, raceFinishedAtMs - raceStartedAtMs);
 
   const handleReturn = () => {
+    if (isClassroomSession) {
+      void gameSocket.leaveRoom();
+      return;
+    }
     if (sessionMode === "shared") {
       gameSocket.returnToLobby();
       return;
@@ -106,7 +123,15 @@ export function FinishOverlay() {
                   <th className="pb-2">#</th>
                   <th className="pb-2">Driver</th>
                   <th className="pb-2">Score</th>
-                  <th className="pb-2">Progress</th>
+                  {isClassroomSession ? (
+                    <>
+                      <th className="pb-2">Correct</th>
+                      <th className="pb-2">Wrong</th>
+                      <th className="pb-2">Timeout</th>
+                    </>
+                  ) : (
+                    <th className="pb-2">Progress</th>
+                  )}
                   <th className="pb-2">Status</th>
                 </tr>
               </thead>
@@ -118,7 +143,15 @@ export function FinishOverlay() {
                       <td className="py-1.5 pr-2">{index + 1}</td>
                       <td className="py-1.5 pr-2">{player.displayName}</td>
                       <td className="py-1.5 pr-2">{Math.max(0, Math.trunc(player.score ?? 0))}</td>
-                      <td className="py-1.5 pr-2">{formatMeters(player.positionMeters)}</td>
+                      {isClassroomSession ? (
+                        <>
+                          <td className="py-1.5 pr-2">{Math.max(0, Math.trunc(player.correctAnswers ?? 0))}</td>
+                          <td className="py-1.5 pr-2">{Math.max(0, Math.trunc(player.wrongAnswers ?? 0))}</td>
+                          <td className="py-1.5 pr-2">{Math.max(0, Math.trunc(player.timeoutAnswers ?? 0))}</td>
+                        </>
+                      ) : (
+                        <td className="py-1.5 pr-2">{formatMeters(player.positionMeters)}</td>
+                      )}
                       <td className="py-1.5 pr-2">{isWinner ? "Winner" : "Stopped"}</td>
                     </tr>
                   );
