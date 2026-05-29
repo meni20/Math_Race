@@ -1,5 +1,12 @@
 import type { PlayerSnapshot } from "../types/messages";
-import { advanceRenderedPlayers } from "./renderMotion";
+import {
+  advanceRenderedPlayers,
+  getClassroomScoreProgressRatio,
+  getClassroomScoreVisualPositionMeters,
+  getClassroomVisualDriveMeters,
+  getClassroomVisualTrackMeters,
+  shouldShowClassroomFinishGate
+} from "./renderMotion";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -47,6 +54,7 @@ export function runRenderMotionTests() {
     lastFrameAtMs: 2000
   });
   assert(afterLowerSnapshot.p1.positionMeters >= previous.positionMeters, "Classroom visual position does not decrease after lower server snapshot.");
+  assert(getClassroomVisualDriveMeters(afterLowerSnapshot.p1) > getClassroomVisualDriveMeters(previous), "Classroom sync snapshots do not rewind visual drive motion.");
 
   const afterFrame = advanceRenderedPlayers({
     previousPlayers: { p1: previous },
@@ -62,7 +70,80 @@ export function runRenderMotionTests() {
     nowMs: 2050,
     lastFrameAtMs: 2000
   });
-  assert(afterFrame.p1.positionMeters > previous.positionMeters, "Classroom visual movement continues between syncs.");
+  assert(getClassroomVisualDriveMeters(afterFrame.p1) > getClassroomVisualDriveMeters(previous), "Classroom visual movement continues between syncs.");
+  assert(getClassroomVisualDriveMeters(afterFrame.p1) - getClassroomVisualDriveMeters(previous) > 1.5, "Classroom visual drive uses a render-only speed multiplier for racing feel.");
+  assert(
+    afterFrame.p1.positionMeters === getClassroomScoreVisualPositionMeters(previous, 500),
+    "Classroom score progress position stays tied to score instead of elapsed visual motion."
+  );
+
+  const afterIdleFrame = advanceRenderedPlayers({
+    previousPlayers: afterFrame,
+    authoritativePlayers: { p1: previous },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: true,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 2550,
+    lastFrameAtMs: 2500
+  });
+  assert(getClassroomVisualDriveMeters(afterIdleFrame.p1) > getClassroomVisualDriveMeters(afterFrame.p1), "Classroom visual drive advances while score is unchanged.");
+
+  const afterLargeDeltaFrame = advanceRenderedPlayers({
+    previousPlayers: afterFrame,
+    authoritativePlayers: { p1: previous },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: true,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 10000,
+    lastFrameAtMs: 2000
+  });
+  assert(
+    getClassroomVisualDriveMeters(afterLargeDeltaFrame.p1) - getClassroomVisualDriveMeters(afterFrame.p1) < 2.1,
+    "Classroom visual drive clamps huge frame deltas to avoid jumps."
+  );
+
+  const afterCorrectBoost = advanceRenderedPlayers({
+    previousPlayers: { p1: previous },
+    authoritativePlayers: { p1: previous },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: true,
+    answerFeedback: { accepted: true, resultType: "CORRECT", pointsDelta: 20, receivedAtMs: 2025 },
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 2050,
+    lastFrameAtMs: 2000
+  });
+  assert(afterCorrectBoost.p1.speedMps > afterFrame.p1.speedMps, "Classroom correct answer temporarily increases visual speed.");
+
+  const afterWrongSlowdown = advanceRenderedPlayers({
+    previousPlayers: { p1: previous },
+    authoritativePlayers: { p1: previous },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: true,
+    answerFeedback: { accepted: true, resultType: "WRONG", pointsDelta: -10, receivedAtMs: 2025 },
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 2050,
+    lastFrameAtMs: 2000
+  });
+  assert(afterWrongSlowdown.p1.speedMps < afterFrame.p1.speedMps, "Classroom wrong answer temporarily decreases visual speed.");
+  assert(afterWrongSlowdown.p1.speedMps > 0, "Classroom slowdown does not stop visual driving.");
 
   const terminalPrevious = finishedPlayer(220, 200);
   const terminalAuthoritative = finishedPlayer(200, 200);
@@ -95,10 +176,20 @@ export function runRenderMotionTests() {
     lastFrameAtMs: 12000
   });
   assert(
-    afterSecondTerminalFrame.p1.positionMeters === afterTerminalFrame.p1.positionMeters,
+    getClassroomVisualDriveMeters(afterSecondTerminalFrame.p1) === getClassroomVisualDriveMeters(afterTerminalFrame.p1),
     "Classroom finished rendered player does not advance position between frames."
   );
   assert(afterSecondTerminalFrame.p1.speedMps === 0, "Classroom finished rendered player speed is frozen at zero.");
+
+  const halfProgressPlayer = player(0, 375);
+  assert(getClassroomScoreProgressRatio(halfProgressPlayer, 750) === 0.5, "Classroom visual progress uses score divided by target score.");
+  assert(
+    getClassroomScoreVisualPositionMeters(halfProgressPlayer, 750) === getClassroomVisualTrackMeters() / 2,
+    "Classroom visual position is normalized to the classroom visual track."
+  );
+  assert(getClassroomVisualTrackMeters() < 3000, "Classroom visual finish does not use the old 3000 meter finish distance.");
+  assert(!shouldShowClassroomFinishGate(0.5, false), "Classroom finish gate stays hidden before late score progress.");
+  assert(shouldShowClassroomFinishGate(0.85, false), "Classroom finish gate appears at late score progress.");
 }
 
 runRenderMotionTests();

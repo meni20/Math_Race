@@ -186,7 +186,7 @@ export function Hud() {
         </>
       ) : null}
 
-      {!isClassroomSession ? <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} /> : null}
+      <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} />
 
       {!isClassroomSession ? (
         <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">

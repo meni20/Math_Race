@@ -35,6 +35,7 @@ function buildRenderedSnapshot(
     classroomVisualMode: gameState.sessionMode === "shared" && gameState.roomCreatorPlayerId === "",
     answerFeedback: gameState.answerFeedback,
     trackLengthMeters: gameState.trackLengthMeters,
+    classroomTargetScore: gameState.roomSettings.targetScore,
     raceStopped: gameState.raceStopped,
     nowMs,
     lastFrameAtMs

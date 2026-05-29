@@ -93,6 +93,7 @@ export interface PlayerSnapshot {
   wrongAnswers?: number;
   timeoutAnswers?: number;
   score?: number;
+  visualDriveMeters?: number;
   routeMode?: string;
   streak?: number;
   averageAnswerTimeMs?: number;
