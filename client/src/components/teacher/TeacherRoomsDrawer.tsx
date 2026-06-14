@@ -33,6 +33,28 @@ function statusTone(status: TeacherRoomSummary["status"]) {
   return "border-slate-100/15 bg-white/6 text-slate-200";
 }
 
+function statusLabel(status: TeacherRoomSummary["status"]) {
+  if (status === "DRAFT") {
+    return "טיוטה";
+  }
+  if (status === "CREATED") {
+    return "נוצר";
+  }
+  if (status === "WAITING") {
+    return "ממתין";
+  }
+  if (status === "RACING") {
+    return "במרוץ";
+  }
+  if (status === "FINISHED") {
+    return "הסתיים";
+  }
+  if (status === "CLOSED") {
+    return "נסגר";
+  }
+  return "נמחק";
+}
+
 export function TeacherRoomsDrawer({
   open,
   rooms,
@@ -63,27 +85,27 @@ export function TeacherRoomsDrawer({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/72 backdrop-blur-sm">
-      <button type="button" aria-label="Close rooms drawer" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <button type="button" aria-label="סגור מגירת חדרים" className="absolute inset-0 cursor-default" onClick={onClose} />
       <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-slate-950 p-4 shadow-[-20px_0_60px_rgba(0,0,0,0.35)]">
         <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">Rooms</p>
-            <h2 className="text-xl font-black text-white">{loading ? "Refreshing..." : `${rooms.length} saved`}</h2>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">חדרים</p>
+            <h2 className="text-xl font-black text-white">{loading ? "מרענן..." : `${rooms.length} שמורים`}</h2>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={handleNewRoom} className="rounded-full border border-cyan-100/30 bg-cyan-300/12 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/20">
-              New Room
+              חדר חדש
             </button>
             <button type="button" onClick={onClose} className="rounded-full border border-white/12 bg-white/6 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-white transition hover:bg-white/10">
-              Close
+              סגור
             </button>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto pt-4">
-          <RoomGroup title="Active Rooms" rooms={activeRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
-          <RoomGroup title="Running Rooms" rooms={runningRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
-          <RoomGroup title="Previous Rooms" rooms={previousRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
+          <RoomGroup title="חדרים פעילים" rooms={activeRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
+          <RoomGroup title="חדרים רצים" rooms={runningRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
+          <RoomGroup title="חדרים קודמים" rooms={previousRooms} selectedRoomCode={selectedRoomCode} onOpenRoom={handleOpenRoom} onDeleteRoom={onDeleteRoom} />
         </div>
       </aside>
     </div>
@@ -108,7 +130,7 @@ function RoomGroup({
       <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/70">{title}</p>
       <div className="grid gap-2">
         {rooms.length === 0 ? (
-          <p className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-3 text-xs text-slate-400">No rooms</p>
+          <p className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-3 text-xs text-slate-400">אין חדרים</p>
         ) : rooms.map((room) => (
           <RoomRow key={room.id || room.roomCode} room={room} selected={room.roomCode === selectedRoomCode} onOpenRoom={onOpenRoom} onDeleteRoom={onDeleteRoom} />
         ))}
@@ -134,15 +156,15 @@ function RoomRow({
         <span className="block truncate text-sm font-black text-white">{room.raceName}</span>
         <span className="mt-1 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.1em] text-cyan-100/75">
           <span>{room.roomCode}</span>
-          <span className={`rounded-full border px-2 py-0.5 ${statusTone(room.status)}`}>{room.status}</span>
+          <span className={`rounded-full border px-2 py-0.5 ${statusTone(room.status)}`}>{statusLabel(room.status)}</span>
         </span>
         <span className="mt-1 block text-xs text-slate-300">
-          {room.currentPlayers}/{room.maxPlayers} students · {formatDate(room.createdAt)}
+          {room.currentPlayers}/{room.maxPlayers} תלמידים · {formatDate(room.createdAt)}
         </span>
       </button>
       <div className="mt-2 flex gap-2">
         <button type="button" onClick={() => onDeleteRoom(room.roomCode)} className="flex-1 rounded-md border border-rose-200/25 bg-rose-500/12 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-500/20">
-          Delete
+          מחק
         </button>
       </div>
     </div>

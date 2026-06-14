@@ -64,7 +64,7 @@ export function TeacherDashboard() {
     void client.listRooms()
       .then(setRooms)
       .catch((error) => {
-        const message = error instanceof Error ? error.message : "Unable to load rooms.";
+        const message = error instanceof Error ? error.message : "לא ניתן לטעון חדרים.";
         setLastClassroomError(message);
         setConnectionMessage(message);
       })
@@ -127,7 +127,7 @@ export function TeacherDashboard() {
           id: buildRandomId("event"),
           type: "JOINED",
           playerId: player.playerId,
-          message: `${player.name} joined with ${player.carName ?? "a car"}.`,
+          message: `${player.name} הצטרף עם ${player.carName ?? "רכב"}.`,
           createdAt: new Date().toISOString()
         });
       } else {
@@ -136,7 +136,7 @@ export function TeacherDashboard() {
             id: buildRandomId("event"),
             type: "RACING",
             playerId: player.playerId,
-            message: `${player.name} entered the race.`,
+            message: `${player.name} נכנס למרוץ.`,
             createdAt: new Date().toISOString()
           });
         }
@@ -145,7 +145,7 @@ export function TeacherDashboard() {
             id: buildRandomId("event"),
             type: "FINISHED",
             playerId: player.playerId,
-            message: `${player.name} finished the race.`,
+            message: `${player.name} סיים את המרוץ.`,
             createdAt: new Date().toISOString()
           });
         }
@@ -154,7 +154,7 @@ export function TeacherDashboard() {
             id: buildRandomId("event"),
             type: "CORRECT_ANSWER",
             playerId: player.playerId,
-            message: `${player.name} answered correctly${(player.streak ?? 0) > 1 ? ` (${player.streak} streak)` : ""}.`,
+            message: `${player.name} ענה נכון${(player.streak ?? 0) > 1 ? ` (רצף ${player.streak})` : ""}.`,
             createdAt: new Date().toISOString()
           });
         }
@@ -163,7 +163,7 @@ export function TeacherDashboard() {
             id: buildRandomId("event"),
             type: "WRONG_ANSWER",
             playerId: player.playerId,
-            message: `${player.name} missed a question.`,
+            message: `${player.name} טעה בשאלה.`,
             createdAt: new Date().toISOString()
           });
         }
@@ -173,7 +173,7 @@ export function TeacherDashboard() {
           id: buildRandomId("event"),
           type: "OVERTAKE",
           playerId: player.playerId,
-          message: `${player.name} moved to rank ${player.rank}.`,
+          message: `${player.name} עלה למקום ${player.rank}.`,
           createdAt: new Date().toISOString()
         });
       }
@@ -192,7 +192,7 @@ export function TeacherDashboard() {
   const roomIsTerminal = snapshot?.lifecycleStatus === "CLOSED" || snapshot?.lifecycleStatus === "DELETED";
   const hasStartableStudents = activePlayers.length > 0;
   const canStart = Boolean(snapshot && !roomIsTerminal && snapshot.racePhase === "lobby" && hasStartableStudents);
-  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore} pts` : `${config.targetScore} pts`;
+  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore} נק'` : `${config.targetScore} נק'`;
 
   const createRace = async () => {
     if (adapterInfo.mode === "unavailable") {
@@ -217,7 +217,7 @@ export function TeacherDashboard() {
       }
       refreshRooms();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not create room.";
+      const message = error instanceof Error ? error.message : "לא ניתן ליצור חדר.";
       setLastClassroomError(message);
       setConnection("error");
       setConnectionMessage(message);
@@ -228,13 +228,13 @@ export function TeacherDashboard() {
   };
 
   const removePlayer = (playerId: string) => {
-    const playerName = snapshot?.players.find((player) => player.playerId === playerId)?.name ?? "Student";
+    const playerName = snapshot?.players.find((player) => player.playerId === playerId)?.name ?? "תלמיד";
     void clientRef.current?.removePlayer(playerId);
     setEvents((current) => [{
       id: buildRandomId("event"),
       type: "REMOVED",
       playerId,
-      message: `${playerName} removed from the room.`,
+      message: `${playerName} הוסר מהחדר.`,
       createdAt: new Date().toISOString()
     }, ...current].slice(0, 30));
   };
@@ -246,11 +246,11 @@ export function TeacherDashboard() {
     setEvents((current) => [{
       id: buildRandomId("event"),
       type: "STARTED",
-      message: "Race started.",
+      message: "המרוץ התחיל.",
       createdAt: new Date().toISOString()
     }, ...current].slice(0, 30));
     void clientRef.current?.startRace().then(refreshRooms).catch((error) => {
-      const message = error instanceof Error ? error.message : "Could not start race.";
+      const message = error instanceof Error ? error.message : "לא ניתן להתחיל את המרוץ.";
       setLastClassroomError(message);
       setConnectionMessage(message);
     });
@@ -258,14 +258,14 @@ export function TeacherDashboard() {
 
   const endRace = () => {
     void clientRef.current?.returnToLobby().then(refreshRooms).catch((error) => {
-      const message = error instanceof Error ? error.message : "Could not end race.";
+      const message = error instanceof Error ? error.message : "לא ניתן לסיים את המרוץ.";
       setLastClassroomError(message);
       setConnectionMessage(message);
     });
     setEvents((current) => [{
       id: buildRandomId("event"),
       type: "ENDED",
-      message: "Race ended.",
+      message: "המרוץ הסתיים.",
       createdAt: new Date().toISOString()
     }, ...current].slice(0, 30));
   };
@@ -285,7 +285,7 @@ export function TeacherDashboard() {
     setEvents([]);
     setView("lobby");
     void clientRef.current?.openRoom(roomCode).catch((error) => {
-      const message = error instanceof Error ? error.message : "Could not open room.";
+      const message = error instanceof Error ? error.message : "לא ניתן לפתוח חדר.";
       setLastClassroomError(message);
       setConnectionMessage(message);
       setView("create");
@@ -311,7 +311,7 @@ export function TeacherDashboard() {
   };
 
   const deleteRoom = (roomCode: string) => {
-    if (!window.confirm(`Delete room ${roomCode}? It will be hidden from students and archived from this list.`)) {
+    if (!window.confirm(`למחוק את החדר ${roomCode}? הוא יוסתר מתלמידים ויועבר לארכיון.`)) {
       return;
     }
     void clientRef.current?.deleteRoom(roomCode).then(() => {
@@ -321,7 +321,7 @@ export function TeacherDashboard() {
       }
       refreshRooms();
     }).catch((error) => {
-      const message = error instanceof Error ? error.message : "Could not delete room.";
+        const message = error instanceof Error ? error.message : "לא ניתן למחוק חדר.";
       setLastClassroomError(message);
       setConnectionMessage(message);
     });
@@ -337,11 +337,11 @@ export function TeacherDashboard() {
       thresholdHours: 24,
       excludeRoomCode: snapshot?.roomId
     }).then((result) => {
-      setConnectionMessage(`Archived ${result.archivedCount} stale room(s) older than ${result.thresholdHours}h.`);
+      setConnectionMessage(`הועברו לארכיון ${result.archivedCount} חדרים ישנים מעל ${result.thresholdHours} שעות.`);
       setLastClassroomError("");
       refreshRooms();
     }).catch((error) => {
-      const message = error instanceof Error ? error.message : "Could not archive stale rooms.";
+      const message = error instanceof Error ? error.message : "לא ניתן להעביר חדרים ישנים לארכיון.";
       setLastClassroomError(message);
       setConnectionMessage(message);
     }).finally(() => {
@@ -350,12 +350,12 @@ export function TeacherDashboard() {
   };
 
   const connectedLabel = connection === "connected"
-    ? "Connected"
+    ? "מחובר"
     : connection === "connecting"
-      ? "Connecting"
+      ? "מתחבר"
       : connection === "error"
-        ? "Limited"
-        : "Offline";
+        ? "מוגבל"
+        : "לא מחובר";
 
   return (
     <section className="pointer-events-auto absolute inset-0 z-40 overflow-y-auto bg-slate-950 text-slate-100">
@@ -382,7 +382,7 @@ export function TeacherDashboard() {
         {import.meta.env.DEV ? (
           <details className="mt-3 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300">
             <summary className="cursor-pointer font-bold uppercase tracking-[0.12em] text-cyan-100/75">
-              Developer diagnostics
+              אבחון פיתוח
             </summary>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {(() => {
@@ -390,32 +390,32 @@ export function TeacherDashboard() {
                 const syncDebug = getActiveSyncDebugState();
                 return (
                   <>
-                    <span>Teacher transport: {liveDebug?.transportState ?? "idle"}</span>
-                    <span>SSE connected: {liveDebug?.sseConnected ? "true" : "false"}</span>
-                    <span>SSE healthy: {liveDebug?.sseHealthy ? "true" : "false"}</span>
-                    <span>Polling fallback active: {liveDebug?.teacherPollingActive ? "true" : "false"}</span>
-                    <span>Fallback interval: {liveDebug?.fallbackIntervalMs ?? 0}ms</span>
-                    <span>Last SSE event: {liveDebug?.lastSseEventType || "none"}</span>
-                    <span>SSE messages: {liveDebug?.sseMessageCount ?? 0}</span>
-                    <span>Last SSE: {liveDebug?.lastSseEventAtMs ? new Date(liveDebug.lastSseEventAtMs).toLocaleTimeString() : "never"}</span>
-                    <span>Last poll: {liveDebug?.lastTeacherPollAtMs ? new Date(liveDebug.lastTeacherPollAtMs).toLocaleTimeString() : "never"}</span>
-                    <span>Stop reason: {liveDebug?.stopReason || "none"}</span>
-                    <span>Teacher timers: {liveDebug?.activeTeacherTimers ?? 0}</span>
-                    <span>teacher-room-events last 60s: {syncDebug.requestCountsLast60s.teacherRoomEvents}</span>
-                    <span>teacher-sync-room last 60s: {syncDebug.requestCountsLast60s.teacherSyncRoom}</span>
-                    <span>blocked teacher-sync-room last 60s: {syncDebug.requestCountsLast60s.teacherSyncRoomBlocked}</span>
-                    <span>list-teacher-rooms last 60s: {syncDebug.requestCountsLast60s.listTeacherRooms}</span>
-                    <span>Active polling timers: {syncDebug.activePollingTimersCount}</span>
+                    <span>ערוץ מורה: {liveDebug?.transportState ?? "לא פעיל"}</span>
+                    <span>SSE מחובר: {liveDebug?.sseConnected ? "כן" : "לא"}</span>
+                    <span>SSE תקין: {liveDebug?.sseHealthy ? "כן" : "לא"}</span>
+                    <span>גיבוי דגימה פעיל: {liveDebug?.teacherPollingActive ? "כן" : "לא"}</span>
+                    <span>מרווח גיבוי: {liveDebug?.fallbackIntervalMs ?? 0}ms</span>
+                    <span>אירוע SSE אחרון: {liveDebug?.lastSseEventType || "אין"}</span>
+                    <span>הודעות SSE: {liveDebug?.sseMessageCount ?? 0}</span>
+                    <span>SSE אחרון: {liveDebug?.lastSseEventAtMs ? new Date(liveDebug.lastSseEventAtMs).toLocaleTimeString() : "אף פעם"}</span>
+                    <span>דגימה אחרונה: {liveDebug?.lastTeacherPollAtMs ? new Date(liveDebug.lastTeacherPollAtMs).toLocaleTimeString() : "אף פעם"}</span>
+                    <span>סיבת עצירה: {liveDebug?.stopReason || "אין"}</span>
+                    <span>טיימרי מורה: {liveDebug?.activeTeacherTimers ?? 0}</span>
+                    <span>teacher-room-events ב-60 שניות אחרונות: {syncDebug.requestCountsLast60s.teacherRoomEvents}</span>
+                    <span>teacher-sync-room ב-60 שניות אחרונות: {syncDebug.requestCountsLast60s.teacherSyncRoom}</span>
+                    <span>חסימות teacher-sync-room ב-60 שניות אחרונות: {syncDebug.requestCountsLast60s.teacherSyncRoomBlocked}</span>
+                    <span>list-teacher-rooms ב-60 שניות אחרונות: {syncDebug.requestCountsLast60s.listTeacherRooms}</span>
+                    <span>טיימרי דגימה פעילים: {syncDebug.activePollingTimersCount}</span>
                   </>
                 );
               })()}
-              <span>Classroom adapter: {adapterInfo.mode}</span>
-              <span>Supabase configured: {adapterInfo.supabaseConfigured ? "true" : "false"}</span>
-              <span>Debug tick: {debugTick}</span>
-              <span>Selected room: {snapshot?.roomId ?? "none"}</span>
-              <span>Selected status: {snapshot?.lifecycleStatus ?? "none"}</span>
-              <span>Active sync timers: {getActiveSyncDebugState().activeTimerCount}</span>
-              {lastClassroomError ? <span className="text-amber-100">Last error: {lastClassroomError}</span> : null}
+              <span>מתאם כיתה: {adapterInfo.mode}</span>
+              <span>Supabase מוגדר: {adapterInfo.supabaseConfigured ? "כן" : "לא"}</span>
+              <span>פעימת דיבאג: {debugTick}</span>
+              <span>חדר נבחר: {snapshot?.roomId ?? "אין"}</span>
+              <span>סטטוס נבחר: {snapshot?.lifecycleStatus ?? "אין"}</span>
+              <span>טיימרי סנכרון פעילים: {getActiveSyncDebugState().activeTimerCount}</span>
+              {lastClassroomError ? <span className="text-amber-100">שגיאה אחרונה: {lastClassroomError}</span> : null}
             </div>
             <div className="mt-3">
               <button
@@ -424,7 +424,7 @@ export function TeacherDashboard() {
                 disabled={archivingStaleRooms}
                 className="rounded-md border border-amber-200/30 bg-amber-300/10 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-amber-100 transition hover:bg-amber-300/18 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {archivingStaleRooms ? "Archiving..." : "Archive stale classroom rooms"}
+                {archivingStaleRooms ? "מעביר לארכיון..." : "העבר חדרי כיתה ישנים לארכיון"}
               </button>
             </div>
           </details>
@@ -460,10 +460,10 @@ export function TeacherDashboard() {
 
           {view === "closed" && snapshot ? (
             <section className="rounded-lg border border-white/10 bg-white/[0.035] px-5 py-6">
-              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-cyan-100/70">Previous Room</p>
+              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-cyan-100/70">חדר קודם</p>
               <h2 className="mt-2 text-2xl font-black text-white">{snapshot.roomSettings.raceName}</h2>
               <p className="mt-2 text-sm text-slate-300">
-                Room {snapshot.roomId} is {snapshot.lifecycleStatus.toLowerCase()}. Live sync has stopped and students can no longer join.
+                חדר {snapshot.roomId} סגור או לא פעיל. הסנכרון החי הופסק ותלמידים לא יכולים להצטרף.
               </p>
             </section>
           ) : null}

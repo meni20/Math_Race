@@ -200,10 +200,17 @@ export function getRenderedPlayerSnapshot(
   const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
   const safeSpeedMps = clampSpeed(player.speedMps);
   const safePositionMeters = clampMeters(player.positionMeters, safeTrackLengthMeters);
+  const terminal = raceStopped || player.finished || player.racePhase === "finish";
+  if (terminal) {
+    return {
+      ...player,
+      positionMeters: player.finished ? safeTrackLengthMeters : safePositionMeters,
+      speedMps: 0
+    };
+  }
+
   const snapshotReceivedAtMs = syncMeta?.receivedAtMs ?? nowMs;
-  const snapshotAgeSeconds = raceStopped || player.finished
-    ? 0
-    : Math.max(0, nowMs - snapshotReceivedAtMs) / 1000;
+  const snapshotAgeSeconds = Math.max(0, nowMs - snapshotReceivedAtMs) / 1000;
 
   let predictedSpeedMps = safeSpeedMps;
   let predictedPositionMeters = safePositionMeters + (safeSpeedMps * snapshotAgeSeconds);
@@ -342,10 +349,16 @@ function advanceClassroomRenderedPlayer(
     : scoreProgressPosition;
   const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
   if (terminal) {
+    const terminalScoreProgressPosition = targetPlayer.finished
+      ? CLASSROOM_VISUAL_TRACK_METERS
+      : Math.max(previousScoreProgressPosition, scoreProgressPosition);
+    const terminalVisualDriveMeters = targetPlayer.finished
+      ? CLASSROOM_VISUAL_TRACK_METERS
+      : previousVisualDriveMeters;
     return {
       ...targetPlayer,
-      positionMeters: Math.max(previousScoreProgressPosition, scoreProgressPosition),
-      visualDriveMeters: previousVisualDriveMeters,
+      positionMeters: terminalScoreProgressPosition,
+      visualDriveMeters: terminalVisualDriveMeters,
       speedMps: 0
     };
   }
@@ -404,8 +417,21 @@ function advanceRenderedPlayer(
   previousPlayer: PlayerSnapshot | undefined,
   targetPlayer: PlayerSnapshot,
   deltaSeconds: number,
-  trackLengthMeters: number
+  trackLengthMeters: number,
+  raceStopped: boolean
 ) {
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
+  if (terminal) {
+    return {
+      ...targetPlayer,
+      positionMeters: targetPlayer.finished
+        ? safeTrackLengthMeters
+        : clampMeters(targetPlayer.positionMeters, safeTrackLengthMeters),
+      speedMps: 0
+    };
+  }
+
   if (!previousPlayer) {
     return targetPlayer;
   }
@@ -494,7 +520,8 @@ export function advanceRenderedPlayers({
       previousPlayers[currentPlayerId],
       targetPlayer,
       deltaSeconds,
-      trackLengthMeters
+      trackLengthMeters,
+      raceStopped
     );
   }
 

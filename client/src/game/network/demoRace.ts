@@ -13,6 +13,7 @@ import type {
 } from "../types/messages";
 import { DEFAULT_TARGET_SCORE, buildDefaultRoomSettings, normalizeRoomSettings } from "../utils/roomSettings";
 import { getRandomCarId, normalizeCarId } from "../utils/carSelection";
+import { isSoloRoomId } from "../utils/gameIds";
 import {
   localRoomToStateUpdate,
   readLocalClassroomRoom,
@@ -103,6 +104,10 @@ function calculateDynamicTrackLengthMeters(roomSettings: RoomSettings) {
 
 function getTargetScore(session: DemoSession) {
   return Math.max(1, Math.trunc(session.roomSettings.targetScore ?? DEFAULT_TARGET_SCORE));
+}
+
+export function isSoloScoreTargetReached(score: number | null | undefined, targetScore: number | null | undefined) {
+  return Math.max(0, Math.trunc(score ?? 0)) >= Math.max(1, Math.trunc(targetScore ?? DEFAULT_TARGET_SCORE));
 }
 
 export function normalizeSoloBotCount(value: number) {
@@ -207,6 +212,26 @@ function buildJoinMessageFromLocalRoom(payload: ConnectPayload, room: LocalClass
   };
 }
 
+function buildLegacyChoices(answer: number) {
+  const choices = new Set<string>([String(answer)]);
+  for (const offset of [1, -1, 2, -2, 5, -5, 10, -10]) {
+    if (choices.size >= 4) {
+      break;
+    }
+    const candidate = answer + offset;
+    if (candidate >= 0 && candidate !== answer) {
+      choices.add(String(candidate));
+    }
+  }
+  while (choices.size < 4) {
+    const candidate = Math.max(0, answer + Math.floor(Math.random() * 13) - 6);
+    if (candidate !== answer) {
+      choices.add(String(candidate));
+    }
+  }
+  return [...choices].sort(() => Math.random() - 0.5);
+}
+
 function buildArithmeticQuestion(
   highwayChallenge: boolean,
   questionTimeLimitSeconds: number
@@ -216,9 +241,11 @@ function buildArithmeticQuestion(
     const left = 5 + Math.floor(Math.random() * 6);
     const right = 6 + Math.floor(Math.random() * 5);
     const offset = 8 + Math.floor(Math.random() * 15);
+    const answer = (left * right) + offset;
     return {
       prompt: `${left} x ${right} + ${offset}`,
-      answer: (left * right) + offset,
+      answer,
+      choices: buildLegacyChoices(answer),
       difficulty: 3,
       timeLimitMs,
       highwayChallenge: true
@@ -229,9 +256,11 @@ function buildArithmeticQuestion(
   if (choice < 0.5) {
     const left = 7 + Math.floor(Math.random() * 20);
     const right = 6 + Math.floor(Math.random() * 18);
+    const answer = left + right;
     return {
       prompt: `${left} + ${right}`,
-      answer: left + right,
+      answer,
+      choices: buildLegacyChoices(answer),
       difficulty: 1,
       timeLimitMs,
       highwayChallenge: false
@@ -240,9 +269,11 @@ function buildArithmeticQuestion(
 
   const left = 3 + Math.floor(Math.random() * 7);
   const right = 2 + Math.floor(Math.random() * 8);
+  const answer = left * right;
   return {
     prompt: `${left} x ${right}`,
-    answer: left * right,
+    answer,
+    choices: buildLegacyChoices(answer),
     difficulty: 2,
     timeLimitMs,
     highwayChallenge: false
@@ -315,6 +346,7 @@ function questionToMessage(session: DemoSession, question: RaceQuestionPrivate):
     routeMode: question.routeMode,
     operation: question.operation,
     prompt: question.prompt,
+    choices: question.choices,
     difficulty: difficultyToNumber(question.difficulty),
     difficultyLabel: question.difficulty,
     timeLimitMs: question.timeLimitSeconds * 1000,
@@ -354,7 +386,7 @@ function syncDemoLobbyRoster(session: DemoSession) {
   }
 
   const desiredAiCount = Math.max(0, session.roomSettings.maxPlayers - 1);
-  const desiredSoloAiCount = session.roomId.startsWith("solo-")
+  const desiredSoloAiCount = isSoloRoomId(session.roomId)
     ? normalizeSoloBotCount(session.soloBotCount)
     : desiredAiCount;
   session.players = [localPlayer, ...createAiPlayers(session.localPlayerId, desiredSoloAiCount)];
@@ -395,7 +427,7 @@ export class DemoRaceClient {
 
       const now = Date.now();
       const localRoom = readLocalClassroomRoom(payload.roomId);
-      if (localRoom && !payload.roomId.startsWith("solo-")) {
+      if (localRoom && !isSoloRoomId(payload.roomId)) {
         this.connectLocalClassroom(payload, localRoom, now, token);
         return;
       }
@@ -529,7 +561,7 @@ export class DemoRaceClient {
       const targetScore = getTargetScore(session);
       const nextScore = Math.max(0, Math.min(targetScore, Math.trunc(localPlayer.score ?? 0) + score.pointsDelta));
       localPlayer.score = nextScore;
-      if (nextScore >= targetScore) {
+      if (isSoloScoreTargetReached(nextScore, targetScore)) {
         localPlayer.finished = true;
         localPlayer.lap = session.totalLaps;
         localPlayer.racePhase = "finish";
@@ -671,7 +703,7 @@ export class DemoRaceClient {
 
   updateRoomSettings(nextSettings: RoomSettings) {
     const session = this.session;
-    if (!session || session.roomId.startsWith("solo-")) {
+    if (!session || isSoloRoomId(session.roomId)) {
       return;
     }
     if (this.localClassroomMode) {
@@ -991,7 +1023,7 @@ export class DemoRaceClient {
       player.positionMeters = Math.max(0, player.positionMeters + (effectiveSpeed * deltaSeconds));
       player.lap = Math.max(0, Math.floor(player.positionMeters / Math.max(1, session.trackLengthMeters)));
 
-      if (Math.trunc(player.score ?? 0) >= targetScore) {
+      if (isSoloScoreTargetReached(player.score, targetScore)) {
         player.finished = true;
         player.lap = session.totalLaps;
         player.racePhase = "finish";
@@ -1041,7 +1073,7 @@ export class DemoRaceClient {
       player.temporaryDeltaMps = scoreDeltaToSpeedDeltaMps(score.pointsDelta);
       player.temporaryDeltaEndsAtMs = now + DEMO_SPEED_MODIFIER_DURATION_MS;
 
-      if (nextScore >= targetScore) {
+      if (isSoloScoreTargetReached(nextScore, targetScore)) {
         player.finished = true;
         player.lap = session.totalLaps;
         player.racePhase = "finish";

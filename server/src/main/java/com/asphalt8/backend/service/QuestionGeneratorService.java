@@ -1,7 +1,10 @@
 package com.asphalt8.backend.service;
 
 import com.asphalt8.backend.game.model.GeneratedQuestion;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.stereotype.Service;
@@ -96,6 +99,7 @@ public class QuestionGeneratorService {
             UUID.randomUUID().toString(),
             prompt,
             String.valueOf(result),
+            buildChoices(result, random),
             boundedDifficulty,
             template.timeLimitMs(),
             template.boostMultiplier()
@@ -111,6 +115,43 @@ public class QuestionGeneratorService {
             return fallback;
         }
         return values[index];
+    }
+
+    private static List<String> buildChoices(int correctAnswer, ThreadLocalRandom random) {
+        Set<String> choices = new LinkedHashSet<>();
+        choices.add(String.valueOf(correctAnswer));
+        int magnitude = Math.max(4, Math.abs(correctAnswer));
+        int smallStep = Math.max(1, Math.round(magnitude * 0.1f));
+        int mediumStep = Math.max(2, Math.round(magnitude * 0.2f));
+        int[] offsets = new int[] {1, -1, 2, -2, 3, -3, 5, -5, smallStep, -smallStep, mediumStep, -mediumStep, 10, -10};
+
+        for (int offset : offsets) {
+            if (choices.size() >= 4) {
+                break;
+            }
+            int candidate = correctAnswer + offset;
+            if (candidate >= 0 && candidate != correctAnswer) {
+                choices.add(String.valueOf(candidate));
+            }
+        }
+
+        while (choices.size() < 4) {
+            int delta = randomInt(random, 1, Math.max(6, mediumStep + 4));
+            int direction = random.nextBoolean() ? 1 : -1;
+            int candidate = Math.max(0, correctAnswer + (delta * direction));
+            if (candidate != correctAnswer) {
+                choices.add(String.valueOf(candidate));
+            }
+        }
+
+        List<String> shuffled = new ArrayList<>(choices);
+        for (int index = shuffled.size() - 1; index > 0; index--) {
+            int swapIndex = random.nextInt(index + 1);
+            String current = shuffled.get(index);
+            shuffled.set(index, shuffled.get(swapIndex));
+            shuffled.set(swapIndex, current);
+        }
+        return shuffled;
     }
 
     @FunctionalInterface

@@ -145,6 +145,106 @@ export function runRenderMotionTests() {
   assert(afterWrongSlowdown.p1.speedMps < afterFrame.p1.speedMps, "Classroom wrong answer temporarily decreases visual speed.");
   assert(afterWrongSlowdown.p1.speedMps > 0, "Classroom slowdown does not stop visual driving.");
 
+  const fastNearFinish = { ...player(490, 0), speedMps: 90 };
+  const finishedAuthoritative = { ...finishedPlayer(498, 0), speedMps: 90 };
+  const afterFinishedFrame = advanceRenderedPlayers({
+    previousPlayers: { p1: fastNearFinish },
+    authoritativePlayers: { p1: finishedAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 2050,
+    lastFrameAtMs: 2000
+  });
+  const afterSecondFinishedFrame = advanceRenderedPlayers({
+    previousPlayers: afterFinishedFrame,
+    authoritativePlayers: { p1: finishedAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 3050,
+    lastFrameAtMs: 2050
+  });
+  assert(afterFinishedFrame.p1.positionMeters === 500, "Finished rendered player snaps to the finish line.");
+  assert(afterSecondFinishedFrame.p1.positionMeters === 500, "Finished rendered player stays frozen at the finish line.");
+  assert(afterSecondFinishedFrame.p1.speedMps === 0, "Finished rendered player speed is frozen at zero.");
+
+  const finishPhaseAuthoritative = { ...player(260, 0), speedMps: 80, racePhase: "finish" as const };
+  const afterFinishPhaseFrame = advanceRenderedPlayers({
+    previousPlayers: { p1: { ...player(260, 0), speedMps: 80 } },
+    authoritativePlayers: { p1: finishPhaseAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 2050,
+    lastFrameAtMs: 2000
+  });
+  const afterSecondFinishPhaseFrame = advanceRenderedPlayers({
+    previousPlayers: afterFinishPhaseFrame,
+    authoritativePlayers: { p1: finishPhaseAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: false,
+    nowMs: 3050,
+    lastFrameAtMs: 2050
+  });
+  assert(afterFinishPhaseFrame.p1.positionMeters === 260, "Finish-phase rendered player does not coast beyond the authoritative position.");
+  assert(afterSecondFinishPhaseFrame.p1.positionMeters === 260, "Finish-phase rendered player stays stable between frames.");
+  assert(afterSecondFinishPhaseFrame.p1.speedMps === 0, "Finish-phase rendered player speed is frozen at zero.");
+
+  const stoppedAuthoritative = { ...player(300, 0), speedMps: 80 };
+  const afterStoppedFrame = advanceRenderedPlayers({
+    previousPlayers: { p1: stoppedAuthoritative },
+    authoritativePlayers: { p1: stoppedAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: true,
+    nowMs: 2050,
+    lastFrameAtMs: 2000
+  });
+  const afterSecondStoppedFrame = advanceRenderedPlayers({
+    previousPlayers: afterStoppedFrame,
+    authoritativePlayers: { p1: stoppedAuthoritative },
+    playerIds: ["p1"],
+    localPlayerId: "p1",
+    playerSyncMeta: { p1: { receivedAtMs: 2000, serverTimeMs: 2000 } },
+    localMotionPrediction: null,
+    classroomVisualMode: false,
+    answerFeedback: null,
+    trackLengthMeters: 500,
+    raceStopped: true,
+    nowMs: 3050,
+    lastFrameAtMs: 2050
+  });
+  assert(afterStoppedFrame.p1.positionMeters === 300, "Stopped rendered player does not advance from the authoritative position.");
+  assert(afterSecondStoppedFrame.p1.positionMeters === 300, "Stopped rendered player stays stable between frames.");
+  assert(afterSecondStoppedFrame.p1.speedMps === 0, "Stopped rendered player speed is frozen at zero.");
+
   const terminalPrevious = finishedPlayer(220, 200);
   const terminalAuthoritative = finishedPlayer(200, 200);
   const afterTerminalFrame = advanceRenderedPlayers({
@@ -175,6 +275,10 @@ export function runRenderMotionTests() {
     nowMs: 22000,
     lastFrameAtMs: 12000
   });
+  assert(
+    getClassroomVisualDriveMeters(afterTerminalFrame.p1) === getClassroomVisualTrackMeters(),
+    "Classroom finished rendered player snaps visual drive to the classroom finish line."
+  );
   assert(
     getClassroomVisualDriveMeters(afterSecondTerminalFrame.p1) === getClassroomVisualDriveMeters(afterTerminalFrame.p1),
     "Classroom finished rendered player does not advance position between frames."

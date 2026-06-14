@@ -28,9 +28,9 @@ export function TeacherLiveRaceDashboard({ snapshot, events, onRemove }: Teacher
           <TeacherStatsBar stats={view.stats} />
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <DetailsButton label="Leaderboard" onClick={() => openDetails("leaderboard")} />
-          <DetailsButton label="Students" onClick={() => openDetails("students")} />
-          <DetailsButton label="Events" onClick={() => openDetails("events")} />
+          <DetailsButton label="מובילים" onClick={() => openDetails("leaderboard")} />
+          <DetailsButton label="תלמידים" onClick={() => openDetails("students")} />
+          <DetailsButton label="אירועים" onClick={() => openDetails("events")} />
         </div>
       </div>
 

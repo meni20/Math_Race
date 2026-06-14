@@ -10,12 +10,12 @@ export function TeacherStatsBar({ stats }: TeacherStatsBarProps) {
 
   return (
     <section className="grid gap-2 rounded-lg border border-white/10 bg-white/[0.045] p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-      <StatPill label="Accuracy" value={accuracy} />
-      <StatPill label="Answers" value={stats.totalAnswers} />
-      <StatPill label="Avg response" value={averageResponse} />
-      <StatPill label="Students" value={stats.totalStudents} />
-      <StatPill label="Events" value={stats.liveEventsCount} />
-      <StatPill label="Leader" value={stats.currentLeaderName ?? "-"} wide />
+      <StatPill label="דיוק" value={accuracy} />
+      <StatPill label="תשובות" value={stats.totalAnswers} />
+      <StatPill label="זמן ממוצע" value={averageResponse} />
+      <StatPill label="תלמידים" value={stats.totalStudents} />
+      <StatPill label="אירועים" value={stats.liveEventsCount} />
+      <StatPill label="מוביל" value={stats.currentLeaderName ?? "-"} wide />
     </section>
   );
 }

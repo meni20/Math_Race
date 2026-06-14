@@ -125,6 +125,7 @@ export interface QuestionMessage {
   routeMode?: string;
   operation?: string;
   prompt: string;
+  choices?: string[];
   difficulty: number;
   difficultyLabel?: string;
   timeLimitMs: number;

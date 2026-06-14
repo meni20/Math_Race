@@ -5,15 +5,15 @@ import { DEFAULT_TARGET_SCORE, MAX_TARGET_SCORE, MIN_TARGET_SCORE, normalizeRoom
 import type { TeacherPlayerStatus, TeacherPlayerView, TeacherRaceConfig } from "./teacherTypes";
 
 export const TRACK_THEME_LABELS: Record<TrackTheme, string> = {
-  "sunny-forest": "Sunny Forest",
-  "snow-peak": "Snow Peak",
-  "fun-world": "Fun World",
-  grand_prix: "Grand Prix Stadium"
+  "sunny-forest": "יער שמשי",
+  "snow-peak": "פסגת שלג",
+  "fun-world": "עולם כיף",
+  grand_prix: "אצטדיון גרנד פרי"
 };
 
 export const DEFAULT_TEACHER_CONFIG: TeacherRaceConfig = {
-  raceName: "Classroom Math Race",
-  classGroup: "Grade 4",
+  raceName: "מרוץ מתמטיקה כיתתי",
+  classGroup: "כיתה ד",
   roomCode: "",
   trackTheme: "sunny-forest",
   difficulty: "MEDIUM",

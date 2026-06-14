@@ -17,10 +17,10 @@ export function DecisionOverlay() {
 
   return (
     <section className="pointer-events-auto absolute left-1/2 top-1/2 z-30 w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-amber-300/45 bg-slate-950/90 p-5 shadow-neon">
-      <p className="text-xs uppercase tracking-[0.2em] text-amber-200/85">Decision Point</p>
+      <p className="text-xs uppercase tracking-[0.2em] text-amber-200/85">בחירת מסלול</p>
       <h2 className="mt-1 text-xl font-bold text-amber-100">{decision.prompt}</h2>
       <p className="mt-2 text-sm text-slate-300">
-        HIGHWAY: question difficulty spikes; correct answer gives teleport + super boost. DIRT: safe small boost.
+        כביש מהיר: שאלה קשה, ותשובה נכונה נותנת קפיצה ובוסט חזק. דרך עפר: בונוס קטן ובטוח יותר.
       </p>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -28,13 +28,13 @@ export function DecisionOverlay() {
           onClick={() => choose("HIGHWAY")}
           className="rounded-xl border border-rose-300/45 bg-rose-500/20 px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/30"
         >
-          Highway
+          כביש מהיר
         </button>
         <button
           onClick={() => choose("DIRT")}
           className="rounded-xl border border-emerald-300/45 bg-emerald-500/20 px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-emerald-100 transition hover:bg-emerald-500/30"
         >
-          Dirt
+          דרך עפר
         </button>
       </div>
     </section>

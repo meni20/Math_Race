@@ -20,9 +20,9 @@ function clampInteger(value: number, fallback: number, min: number, max: number)
 function buildDefaultRaceName(roomId: string) {
   const trimmedRoomId = roomId.trim();
   if (!trimmedRoomId) {
-    return "Classroom Race";
+    return "מרוץ כיתתי";
   }
-  return `${trimmedRoomId.replace(/[-_]+/g, " ")} setup`;
+  return `הגדרת ${trimmedRoomId.replace(/[-_]+/g, " ")}`;
 }
 
 export function buildDefaultRoomSettings(roomId: string): RoomSettings {
@@ -96,7 +96,7 @@ export function formatDurationLabel(seconds: number) {
   const minutes = Math.floor(safeSeconds / 60);
   const remainderSeconds = safeSeconds % 60;
   if (remainderSeconds === 0) {
-    return `${minutes} min`;
+    return `${minutes} דק'`;
   }
-  return `${minutes}m ${remainderSeconds}s`;
+  return `${minutes}ד ${remainderSeconds}ש`;
 }

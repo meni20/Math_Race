@@ -24,7 +24,7 @@ export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: Teac
   return (
     <section className="grid flex-1 gap-5 py-6 lg:grid-cols-[0.9fr_1.1fr]">
       <div className="rounded-lg border border-white/10 bg-white/6 p-5">
-        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/70">Room code</p>
+        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/70">קוד חדר</p>
         <p className="mt-2 text-5xl font-black tracking-[0.12em] text-white">{snapshot.roomId}</p>
         <div className="mt-5 grid h-44 w-44 grid-cols-9 gap-1 rounded-lg bg-white p-3">
           {qrCells.map((filled, index) => (
@@ -32,7 +32,7 @@ export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: Teac
           ))}
         </div>
         <label className="mt-4 block">
-          <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/70">Join URL</span>
+          <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/70">קישור הצטרפות</span>
           <input
             readOnly
             className="w-full rounded-lg border border-white/10 bg-slate-950/36 px-3 py-2 text-sm text-cyan-50 outline-none"
@@ -45,14 +45,14 @@ export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: Teac
             onClick={copyRoomCode}
             className="rounded-full border border-white/12 bg-white/6 px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-100 transition hover:bg-white/10"
           >
-            Copy Code
+            העתק קוד
           </button>
           <button
             type="button"
             onClick={copyJoinLink}
             className="rounded-full border border-white/12 bg-white/6 px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-100 transition hover:bg-white/10"
           >
-            Copy Link
+            העתק קישור
           </button>
           <button
             type="button"
@@ -60,7 +60,7 @@ export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: Teac
             disabled={!canStart}
             className="rounded-full border border-emerald-200/35 bg-emerald-400/14 px-5 py-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-50 transition hover:bg-emerald-400/22 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            Start Race
+            התחל מרוץ
           </button>
         </div>
       </div>

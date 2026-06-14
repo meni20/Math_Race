@@ -208,6 +208,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         message.roomSettings ?? state.roomSettings,
         minimumPlayers
       );
+      const soloSession = state.sessionMode === "solo" || isSoloRoomId(message.roomId || state.roomId);
       const trackLengthMeters = Number.isFinite(message.trackLengthMeters)
         ? Math.max(1, message.trackLengthMeters ?? state.trackLengthMeters)
         : roomCreatorPlayerId === ""
@@ -217,7 +218,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const playerSyncMeta: Record<string, PlayerSyncMeta> = {};
       for (const player of message.players) {
         const safeLaneIndex = Number.isFinite(player.laneIndex)
-          ? Math.max(0, Math.min(MAX_LANE_INDEX, Math.trunc(player.laneIndex)))
+          ? soloSession
+            ? Math.max(0, Math.trunc(player.laneIndex))
+            : Math.max(0, Math.min(MAX_LANE_INDEX, Math.trunc(player.laneIndex)))
           : 0;
         const safePosition = Number.isFinite(player.positionMeters) ? Math.max(0, player.positionMeters) : 0;
         const safeSpeed = Number.isFinite(player.speedMps) ? Math.max(0, player.speedMps) : 0;

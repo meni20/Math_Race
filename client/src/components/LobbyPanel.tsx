@@ -45,36 +45,65 @@ function formatCountdown(ms: number) {
   return Math.max(0, ms / 1000).toFixed(1);
 }
 
+function connectionLabel(status: string) {
+  if (status === "connected") {
+    return "מחובר";
+  }
+  if (status === "connecting") {
+    return "מתחבר";
+  }
+  if (status === "error") {
+    return "שגיאה";
+  }
+  return "לא מחובר";
+}
+
+function classroomStatusLabel(status: string) {
+  if (status === "RACING") {
+    return "רץ";
+  }
+  if (status === "WAITING") {
+    return "ממתין";
+  }
+  if (status === "STARTING") {
+    return "מתחיל";
+  }
+  if (status === "FINISHED") {
+    return "הסתיים";
+  }
+  return status;
+}
+
 const TRACK_THEME_OPTIONS: Array<{ id: TrackTheme; value: TrackTheme; name: string; label: string; thumbnail: string; previewClass: string }> = [
   {
     id: "sunny-forest",
     value: "sunny-forest",
-    name: "Sunny Forest",
-    label: "Sunny Forest",
+    name: "יער שמשי",
+    label: "יער שמשי",
     thumbnail: "/assets/maps/sunny_forest_preview.jpg",
     previewClass: "bg-[radial-gradient(circle_at_24%_28%,rgba(255,232,132,0.72),transparent_18%),linear-gradient(145deg,#8adf7e_0%,#2e8f57_42%,#18412f_100%)]"
   },
   {
     id: "snow-peak",
     value: "snow-peak",
-    name: "Snow Peak",
-    label: "Snow Peak",
+    name: "פסגת שלג",
+    label: "פסגת שלג",
     thumbnail: "/assets/maps/snow_peak_preview.jpg",
     previewClass: "bg-[radial-gradient(circle_at_72%_18%,rgba(255,255,255,0.9),transparent_16%),linear-gradient(145deg,#eef8ff_0%,#9cc4e6_44%,#324f76_100%)]"
   },
   {
     id: "fun-world",
     value: "fun-world",
-    name: "Fun World",
-    label: "Fun World",
+    name: "עולם כיף",
+    label: "עולם כיף",
     thumbnail: "/assets/maps/fun_world_preview.jpg",
     previewClass: "bg-[radial-gradient(circle_at_24%_24%,rgba(255,179,226,0.82),transparent_18%),radial-gradient(circle_at_78%_34%,rgba(255,232,102,0.72),transparent_20%),linear-gradient(145deg,#7347ff_0%,#30d0ff_48%,#ff78c4_100%)]"
   },
   {
     id: "grand_prix",
     value: "grand_prix",
-    name: "Grand Prix Stadium",
-    label: "Grand Prix Stadium",
+    name: "אצטדיון גרנד פרי",
+    label: "אצטדיון גרנד פרי",
     thumbnail: "/assets/maps/stadium_preview.jpg",
     previewClass: "bg-[radial-gradient(circle_at_50%_16%,rgba(255,255,255,0.92),transparent_12%),radial-gradient(circle_at_18%_66%,rgba(250,204,21,0.46),transparent_19%),radial-gradient(circle_at_82%_66%,rgba(56,189,248,0.42),transparent_19%),linear-gradient(145deg,#1f2937_0%,#475569_42%,#111827_100%)]"
   }
@@ -101,7 +130,7 @@ export function LobbyPanel() {
   const prepareJoin = useGameStore((state) => state.prepareJoin);
 
   const [roomInput, setRoomInput] = useState(roomId || getInitialRoomInput());
-  const [nameInput, setNameInput] = useState(displayName || "Neon Racer");
+  const [nameInput, setNameInput] = useState(displayName || "נהג מתמטי");
   const [roomSettingsDraft, setRoomSettingsDraft] = useState(roomSettings);
   const [nowMs, setNowMs] = useState(Date.now());
   const [joinBoxOpen, setJoinBoxOpen] = useState(hasRoomInUrl());
@@ -137,7 +166,7 @@ export function LobbyPanel() {
   }, [roomId]);
 
   useEffect(() => {
-    setNameInput(displayName || "Neon Racer");
+    setNameInput(displayName || "נהג מתמטי");
   }, [displayName]);
 
   useEffect(() => {
@@ -198,7 +227,7 @@ export function LobbyPanel() {
           return;
         }
         setActiveLobbies([]);
-        setActiveLobbyError(error instanceof Error ? error.message : "Unable to load active classrooms.");
+        setActiveLobbyError(error instanceof Error ? error.message : "לא ניתן לטעון כיתות פעילות.");
       })
       .finally(() => {
         if (requestGeneration === activeListGenerationRef.current) {
@@ -337,44 +366,44 @@ export function LobbyPanel() {
     }
     const room = await getClassroomRoomService().getRoomByCode(normalizedRoomId);
     if (!room) {
-      setActiveLobbyError("Room not found or not available.");
+      setActiveLobbyError("החדר לא נמצא או אינו זמין.");
       setJoinBoxOpen(true);
       return;
     }
     if (room.status === "DELETED" || room.deletedAt) {
-      setActiveLobbyError("This room is no longer available.");
+      setActiveLobbyError("החדר הזה כבר לא זמין.");
       setJoinBoxOpen(true);
       return;
     }
     if (room.status === "CLOSED" || room.closedAt) {
-      setActiveLobbyError("This room was closed by the teacher.");
+      setActiveLobbyError("החדר נסגר על ידי המורה.");
       setJoinBoxOpen(true);
       return;
     }
     if (room.status === "FINISHED" || room.endedAt) {
-      setActiveLobbyError("This race has finished.");
+      setActiveLobbyError("המרוץ הזה הסתיים.");
       setJoinBoxOpen(true);
       return;
     }
     if (!room.isListed) {
-      setActiveLobbyError("This room is not currently available.");
+      setActiveLobbyError("החדר אינו זמין כרגע.");
       setJoinBoxOpen(true);
       return;
     }
     if (room.isLocked) {
-      setActiveLobbyError("Registration is locked.");
+      setActiveLobbyError("ההרשמה נעולה.");
       setJoinBoxOpen(true);
       return;
     }
     const persistedSession = gameSocket.getPersistedWebsocketSession();
     const isResumeAttempt = persistedSession?.roomId === normalizedRoomId;
     if (room.currentPlayers >= room.maxPlayers && !isResumeAttempt) {
-      setActiveLobbyError("Room is full.");
+      setActiveLobbyError("החדר מלא.");
       setJoinBoxOpen(true);
       return;
     }
     if (room.status !== "WAITING" && !(room.status === "RACING" && room.allowMidGameJoin)) {
-      setActiveLobbyError("This room is not joinable right now.");
+      setActiveLobbyError("אי אפשר להצטרף לחדר כרגע.");
       setJoinBoxOpen(true);
       return;
     }
@@ -425,7 +454,7 @@ export function LobbyPanel() {
       playerId: nextPlayerId,
       carId: selectedCarId,
       roomSettings: {
-        raceName: "Solo Race",
+        raceName: "מרוץ סולו",
         maxPlayers: Math.max(1, Math.min(4, soloBotCount + 1)),
         raceDurationSeconds: 180,
         questionTimeLimitSeconds: 15,
@@ -470,7 +499,7 @@ export function LobbyPanel() {
     : localPlayer?.racePhase === "lobby"
       ? "WAITING"
       : localPlayer?.racePhase?.toUpperCase();
-  const classroomPlayerName = displayName || localPlayer?.displayName || "Student";
+  const classroomPlayerName = displayName || localPlayer?.displayName || "תלמיד";
 
   if (isActiveRace) {
     if (isClassroomSession) {
@@ -495,7 +524,7 @@ export function LobbyPanel() {
           onClick={onExitRace}
           className="rounded-full border border-rose-200/30 bg-rose-500/14 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/22"
         >
-          {isSharedSession ? "Exit to Lobby" : "Exit"}
+          {isSharedSession ? "חזרה ללובי" : "יציאה"}
         </button>
       </section>
     );
@@ -526,7 +555,7 @@ export function LobbyPanel() {
           <section className="pointer-events-auto absolute bottom-28 left-1/2 z-30 w-[min(92vw,24rem)] -translate-x-1/2 rounded-2xl border border-white/14 bg-slate-950/72 p-4 shadow-[0_18px_46px_rgba(2,8,23,0.38)]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/75">Race Settings</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/75">הגדרות מרוץ</p>
                 <p className="mt-1 text-sm font-semibold text-slate-50">{roomSettings.raceName}</p>
               </div>
               <button
@@ -534,35 +563,35 @@ export function LobbyPanel() {
                 onClick={() => setSettingsOpen(false)}
                 className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold uppercase tracking-[0.1em] text-slate-100 transition hover:bg-white/10"
               >
-                Close
+                סגור
               </button>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="block sm:col-span-2">
-                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Race Name</span>
+                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">שם המרוץ</span>
                 <input
                   className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none transition focus:border-cyan-100/35 focus:ring-2 focus:ring-cyan-100/10"
                   value={roomSettingsDraft.raceName}
                   onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceName: event.target.value }))}
-                  placeholder="Classroom Race"
+                  placeholder="מרוץ כיתתי"
                 />
               </label>
               <label className="block sm:col-span-2">
-                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Target Points</span>
+                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">נקודות יעד</span>
                 <select
                   className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none transition focus:border-cyan-100/35"
                   value={normalizedRoomSettingsDraft.targetScore}
                   onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, targetScore: Number(event.target.value) }))}
                 >
-                  <option value={300}>300 quick race</option>
-                  <option value={500}>500 normal race</option>
-                  <option value={1000}>1000 long race</option>
-                  <option value={1500}>1500 challenge</option>
+                  <option value={300}>300 מרוץ קצר</option>
+                  <option value={500}>500 מרוץ רגיל</option>
+                  <option value={1000}>1000 מרוץ ארוך</option>
+                  <option value={1500}>1500 אתגר</option>
                 </select>
               </label>
               <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100">
-                <p className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Map</p>
+                <p className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">מפה</p>
                 <p className="mt-1 font-semibold">{currentTrack.name}</p>
               </div>
             </div>
@@ -573,7 +602,7 @@ export function LobbyPanel() {
               disabled={!roomSettingsDirty}
               className="mt-3 w-full rounded-xl border border-cyan-100/30 bg-cyan-100/12 px-4 py-2.5 text-sm font-bold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-100/18 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save Settings
+              שמור הגדרות
             </button>
           </section>
         ) : null}
@@ -582,7 +611,7 @@ export function LobbyPanel() {
           {showRoomSettingsEditor ? (
             <button
               type="button"
-              aria-label="Settings"
+              aria-label="הגדרות"
               onClick={() => setSettingsOpen((current) => !current)}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xl text-slate-100 transition hover:border-cyan-100/35 hover:bg-cyan-100/10"
             >
@@ -595,14 +624,14 @@ export function LobbyPanel() {
             disabled={!canStartRace}
             className="rounded-full border border-cyan-100/30 bg-cyan-100/12 px-7 py-3 text-sm font-black uppercase tracking-[0.14em] text-cyan-50 transition hover:border-cyan-100/55 hover:bg-cyan-100/18 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {racePhase === "starting" ? `Starting ${formatCountdown(countdownMs)}s` : "Start Race"}
+            {racePhase === "starting" ? `מתחילים בעוד ${formatCountdown(countdownMs)} שנ'` : "התחל מרוץ"}
           </button>
           <button
             type="button"
             onClick={onLeaveRoom}
             className="rounded-full border border-rose-200/30 bg-rose-500/12 px-5 py-3 text-xs font-bold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/20"
           >
-            Exit
+            יציאה
           </button>
         </section>
       </>
@@ -616,7 +645,7 @@ export function LobbyPanel() {
         onClick={() => setMapModalOpen(true)}
         className="pointer-events-auto absolute left-5 top-5 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
       >
-        Maps
+        מפות
       </button>
 
       <button
@@ -626,12 +655,12 @@ export function LobbyPanel() {
         }}
         className="pointer-events-auto absolute left-5 top-20 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
       >
-        Teacher
+        מורה
       </button>
 
       <button
         type="button"
-        aria-label="Previous car"
+        aria-label="רכב קודם"
         onClick={() => cycleGarageCar(-1)}
         className="pointer-events-auto absolute left-4 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/12 bg-slate-950/58 text-2xl font-light text-cyan-50 shadow-[0_14px_34px_rgba(2,8,23,0.28)] transition hover:border-cyan-100/45 hover:bg-cyan-300/12"
       >
@@ -639,7 +668,7 @@ export function LobbyPanel() {
       </button>
       <button
         type="button"
-        aria-label="Next car"
+        aria-label="רכב הבא"
         onClick={() => cycleGarageCar(1)}
         className="pointer-events-auto absolute right-4 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/12 bg-slate-950/58 text-2xl font-light text-cyan-50 shadow-[0_14px_34px_rgba(2,8,23,0.28)] transition hover:border-cyan-100/45 hover:bg-cyan-300/12"
       >
@@ -657,20 +686,20 @@ export function LobbyPanel() {
           }`}
         >
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-50/80">Map Selection</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-50/80">בחירת מפה</p>
             <button
               type="button"
               onClick={() => setMapModalOpen(false)}
               className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-slate-100 transition hover:bg-white/10"
             >
-              Close
+              סגור
             </button>
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-white/12 bg-slate-950/28 p-3">
             <button
               type="button"
-              aria-label="Previous map"
+              aria-label="מפה קודמת"
               onClick={() => cycleTrackTheme(-1)}
               className="absolute left-5 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/14 bg-slate-950/38 text-2xl font-light text-cyan-50 backdrop-blur-xl transition hover:bg-cyan-300/14"
             >
@@ -688,7 +717,7 @@ export function LobbyPanel() {
             </div>
             <button
               type="button"
-              aria-label="Next map"
+              aria-label="מפה הבאה"
               onClick={() => cycleTrackTheme(1)}
               className="absolute right-5 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/14 bg-slate-950/38 text-2xl font-light text-cyan-50 backdrop-blur-xl transition hover:bg-cyan-300/14"
             >
@@ -702,7 +731,7 @@ export function LobbyPanel() {
 
       <div className="pointer-events-none absolute left-1/2 top-6 z-20 translate-x-[-32%] text-center sm:top-8">
         <h1 className="text-3xl font-black uppercase tracking-[0.24em] text-cyan-50 drop-shadow-[0_0_18px_rgba(103,232,249,0.28)] sm:text-5xl">
-          MATH RACING
+          מרוץ מתמטיקה
         </h1>
       </div>
 
@@ -711,17 +740,17 @@ export function LobbyPanel() {
           {(nameInput.trim() || "N").slice(0, 1)}
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">Username</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">שם שחקן</p>
           <input
             className="mt-0.5 w-32 bg-transparent text-sm font-semibold text-slate-50 outline-none placeholder:text-slate-300/55"
             value={nameInput}
             onChange={(event) => setNameInput(event.target.value)}
-            placeholder="Neon Racer"
+            placeholder="נהג מתמטי"
           />
         </div>
         <span className={`hidden items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold uppercase sm:inline-flex ${badgeClass}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${badgeDotClass} animate-pulse`} />
-          {connection}
+          {connectionLabel(connection)}
         </span>
       </div>
 
@@ -731,7 +760,7 @@ export function LobbyPanel() {
             <form onSubmit={onJoin}>
               <label className="block">
                 <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100/80">
-                  Room code
+                  קוד חדר
                 </span>
                 <input
                   className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-50 outline-none transition placeholder:text-slate-300/55 focus:border-cyan-100/35 focus:bg-slate-950/55 focus:ring-2 focus:ring-cyan-100/10"
@@ -746,14 +775,14 @@ export function LobbyPanel() {
                   onClick={() => setJoinBoxOpen(false)}
                   className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
                 >
-                  Cancel
+                  ביטול
                 </button>
                 <button
                   type="submit"
                   disabled={connecting}
                   className="rounded-xl border border-teal-100/30 bg-teal-400/14 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-teal-50 transition hover:border-teal-100/55 hover:bg-teal-400/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Join
+                  הצטרף
                 </button>
               </div>
             </form>
@@ -761,15 +790,15 @@ export function LobbyPanel() {
             <div className="mt-4 border-t border-white/10 pt-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">Active classrooms</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">כיתות פעילות</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     void refreshActiveClassrooms(true);
                   }}
-                  aria-label="Refresh classrooms"
-                  title="Refresh classrooms"
+                  aria-label="רענן כיתות"
+                  title="רענן כיתות"
                   className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-sm text-slate-100 transition hover:bg-white/10"
                 >
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
@@ -784,7 +813,7 @@ export function LobbyPanel() {
                 {activeLobbyError ? (
                   <p className="rounded-xl bg-amber-300/10 px-3 py-3 text-xs text-amber-100">{activeLobbyError}</p>
                 ) : activeLobbies.length === 0 ? (
-                  <p className="rounded-xl bg-white/5 px-3 py-3 text-xs text-slate-300">No active classrooms are available.</p>
+                  <p className="rounded-xl bg-white/5 px-3 py-3 text-xs text-slate-300">אין כיתות פעילות זמינות.</p>
                 ) : activeLobbies.map((room) => {
                   const currentPlayers = room.currentPlayers;
                   const runningJoinable = room.status === "RACING" && room.allowMidGameJoin;
@@ -799,7 +828,7 @@ export function LobbyPanel() {
                     >
                       <span className={`h-2 w-2 rounded-full ${!joinable ? "bg-slate-400" : runningJoinable ? "bg-sky-300" : "bg-emerald-300"}`} />
                       <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-cyan-100/85">{room.roomCode}</span>
-                      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">{room.status === "RACING" ? "Running" : "Waiting"}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">{room.status === "RACING" ? "רץ" : "ממתין"}</span>
                       <span className="text-[11px] text-slate-300">{currentPlayers}/{room.maxPlayers}</span>
                     </button>
                   );
@@ -811,42 +840,42 @@ export function LobbyPanel() {
 
         {soloSetupOpen ? (
           <div className="rounded-2xl border border-white/12 bg-slate-950/72 p-3 shadow-[0_18px_50px_rgba(2,8,23,0.32)] backdrop-blur-xl">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">Solo setup</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">הגדרת סולו</p>
             <label className="mt-3 block">
-              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Bots</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">יריבים</span>
               <select
                 className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
                 value={soloBotCount}
                 onChange={(event) => setSoloBotCount(Number(event.target.value))}
               >
                 {[1, 2, 3].map((value) => (
-                  <option key={value} value={value}>{value} bot{value === 1 ? "" : "s"}</option>
+                  <option key={value} value={value}>{value} {value === 1 ? "יריב" : "יריבים"}</option>
                 ))}
               </select>
             </label>
             <label className="mt-3 block">
-              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Difficulty</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">רמה</span>
               <select
                 className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
                 value={soloDifficulty}
                 onChange={(event) => setSoloDifficulty(event.target.value as "EASY" | "MEDIUM" | "HARD")}
               >
-                <option value="EASY">Easy</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="HARD">Hard</option>
+                <option value="EASY">קל</option>
+                <option value="MEDIUM">בינוני</option>
+                <option value="HARD">קשה</option>
               </select>
             </label>
             <label className="mt-3 block">
-              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Target Points</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">נקודות יעד</span>
               <select
                 className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
                 value={soloTargetScore}
                 onChange={(event) => setSoloTargetScore(Number(event.target.value))}
               >
-                <option value={300}>300 short race</option>
-                <option value={500}>500 normal race</option>
-                <option value={1000}>1000 long race</option>
-                <option value={3000}>3000 marathon race</option>
+                <option value={300}>300 מרוץ קצר</option>
+                <option value={500}>500 מרוץ רגיל</option>
+                <option value={1000}>1000 מרוץ ארוך</option>
+                <option value={3000}>3000 מרתון</option>
               </select>
             </label>
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -855,7 +884,7 @@ export function LobbyPanel() {
                 onClick={() => setSoloSetupOpen(false)}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
               >
-                Cancel
+                ביטול
               </button>
               <button
                 type="button"
@@ -863,7 +892,7 @@ export function LobbyPanel() {
                 disabled={connecting}
                 className="rounded-xl border border-cyan-100/30 bg-cyan-300/14 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-300/22 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Start Solo
+                התחל סולו
               </button>
             </div>
           </div>
@@ -875,7 +904,7 @@ export function LobbyPanel() {
           disabled={connecting}
           className="rounded-2xl border border-teal-100/30 bg-slate-950/34 px-5 py-3 text-left text-sm font-bold uppercase tracking-[0.12em] text-teal-50 shadow-[0_18px_46px_rgba(2,8,23,0.3)] backdrop-blur-xl transition hover:border-teal-100/55 hover:bg-teal-400/14 hover:shadow-[0_0_20px_rgba(45,212,191,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {demoMode ? "Join Lobby" : "Join Room"}
+          {demoMode ? "הצטרף ללובי" : "הצטרף לחדר"}
         </button>
         <button
           type="button"
@@ -883,7 +912,7 @@ export function LobbyPanel() {
           disabled={connecting}
           className="rounded-2xl border border-cyan-100/25 bg-cyan-100/10 px-5 py-3 text-left text-sm font-bold uppercase tracking-[0.12em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.3)] backdrop-blur-xl transition hover:border-cyan-100/50 hover:bg-cyan-100/16 hover:shadow-[0_0_20px_rgba(165,243,252,0.16)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Play Solo
+          משחק סולו
         </button>
         {connection === "error" && connectionErrorMessage ? (
           <p className="rounded-xl border border-rose-400/45 bg-rose-500/12 px-3 py-2 text-xs text-rose-100 backdrop-blur-xl">
@@ -892,31 +921,31 @@ export function LobbyPanel() {
         ) : null}
         {import.meta.env.DEV ? (
           <details className="rounded-2xl border border-white/10 bg-slate-950/56 px-3 py-2 text-[10px] text-slate-300 backdrop-blur-xl">
-            <summary className="cursor-pointer font-bold uppercase tracking-[0.12em] text-cyan-100/75">Sync diagnostics</summary>
+            <summary className="cursor-pointer font-bold uppercase tracking-[0.12em] text-cyan-100/75">אבחון סנכרון</summary>
             <div className="mt-2 grid gap-1">
-              <span>Student sync active: {studentSyncDebug ? "true" : "false"}</span>
-              <span>sync-room last 60s: {syncDebug?.requestCountsLast60s.syncRoom ?? 0}</span>
-              <span>list-active-classroom-rooms last 60s: {syncDebug?.requestCountsLast60s.listActiveClassroomRooms ?? 0}</span>
-              <span>Active list polling: {syncDebug?.activeClassroomList.pollingActive ? "true" : "false"}</span>
-              <span>Active list in flight: {syncDebug?.activeClassroomList.inFlight ? "true" : "false"}</span>
-              <span>Active list in classroom: {syncDebug?.activeClassroomList.inClassroomRoom ? "true" : "false"}</span>
-              <span>Student realtime healthy: {syncDebug?.studentRealtime.healthy ? "true" : "false"}</span>
-              <span>Student sync fallback active: {syncDebug?.studentRealtime.syncFallbackActive ? "true" : "false"}</span>
-              <span>Last active list: {syncDebug?.activeClassroomList.lastRefreshAtMs ? new Date(syncDebug.activeClassroomList.lastRefreshAtMs).toLocaleTimeString() : "never"}</span>
-              <span>Next active list: {syncDebug?.activeClassroomList.nextRefreshAtMs ? new Date(syncDebug.activeClassroomList.nextRefreshAtMs).toLocaleTimeString() : "none"}</span>
-              <span>Active polling timers: {syncDebug?.activePollingTimersCount ?? 0}</span>
-              <span>Current interval: {studentSyncDebug?.intervalMs ?? 0}ms</span>
-              <span>Next sync: {studentSyncDebug?.nextSyncAtMs ? new Date(studentSyncDebug.nextSyncAtMs).toLocaleTimeString() : "none"}</span>
-              <span>Room: {roomId || "none"} / {roomRacePhase}</span>
-              <span>Participant: {playerId || "none"} / {localPlayer?.racePhase ?? "none"}</span>
-              <span>Last stop: {syncDebug?.recentStops.find((entry) => entry.role === "student")?.stopReason ?? "none"}</span>
+              <span>סנכרון תלמיד פעיל: {studentSyncDebug ? "כן" : "לא"}</span>
+              <span>sync-room ב-60 שניות אחרונות: {syncDebug?.requestCountsLast60s.syncRoom ?? 0}</span>
+              <span>list-active-classroom-rooms ב-60 שניות אחרונות: {syncDebug?.requestCountsLast60s.listActiveClassroomRooms ?? 0}</span>
+              <span>דגימת רשימה פעילה: {syncDebug?.activeClassroomList.pollingActive ? "כן" : "לא"}</span>
+              <span>בקשת רשימה פעילה באוויר: {syncDebug?.activeClassroomList.inFlight ? "כן" : "לא"}</span>
+              <span>רשימה פעילה בתוך חדר: {syncDebug?.activeClassroomList.inClassroomRoom ? "כן" : "לא"}</span>
+              <span>Realtime תלמיד תקין: {syncDebug?.studentRealtime.healthy ? "כן" : "לא"}</span>
+              <span>גיבוי סנכרון תלמיד פעיל: {syncDebug?.studentRealtime.syncFallbackActive ? "כן" : "לא"}</span>
+              <span>רשימה פעילה אחרונה: {syncDebug?.activeClassroomList.lastRefreshAtMs ? new Date(syncDebug.activeClassroomList.lastRefreshAtMs).toLocaleTimeString() : "אף פעם"}</span>
+              <span>רשימה פעילה הבאה: {syncDebug?.activeClassroomList.nextRefreshAtMs ? new Date(syncDebug.activeClassroomList.nextRefreshAtMs).toLocaleTimeString() : "אין"}</span>
+              <span>טיימרי דגימה פעילים: {syncDebug?.activePollingTimersCount ?? 0}</span>
+              <span>מרווח נוכחי: {studentSyncDebug?.intervalMs ?? 0}ms</span>
+              <span>סנכרון הבא: {studentSyncDebug?.nextSyncAtMs ? new Date(studentSyncDebug.nextSyncAtMs).toLocaleTimeString() : "אין"}</span>
+              <span>חדר: {roomId || "אין"} / {roomRacePhase}</span>
+              <span>משתתף: {playerId || "אין"} / {localPlayer?.racePhase ?? "אין"}</span>
+              <span>עצירה אחרונה: {syncDebug?.recentStops.find((entry) => entry.role === "student")?.stopReason ?? "אין"}</span>
             </div>
           </details>
         ) : null}
       </div>
 
       <p className="pointer-events-none absolute bottom-8 left-1/2 z-20 w-[min(86vw,32rem)] -translate-x-1/2 text-center text-xs leading-5 text-slate-100/80 sm:text-sm">
-        Join a room to enter the pre-race lobby and wait for the teacher to start.
+        הצטרף לחדר כדי להיכנס ללובי לפני המרוץ ולהמתין שהמורה יתחיל.
       </p>
     </>
   );

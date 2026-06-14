@@ -492,6 +492,7 @@ function toQuestionMessage(roomId: string, player: PlayerStateRecord, pending: P
     routeMode: question.routeMode,
     operation: question.operation,
     prompt: question.prompt,
+    choices: question.choices,
     difficulty: difficultyToNumber(question.difficulty),
     difficultyLabel: question.difficulty,
     timeLimitMs: question.timeLimitSeconds * 1000,
