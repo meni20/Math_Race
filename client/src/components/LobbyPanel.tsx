@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import profileCarAvatar from "../assets/profile-car.svg";
 import type { TrackTheme } from "../game/types/messages";
 import { gameSocket } from "../game/network/gameSocket";
 import { isDemoTransportConfigured } from "../game/network/transportConfig";
@@ -469,8 +470,12 @@ export function LobbyPanel() {
       </div>
 
       <div className="pointer-events-auto absolute right-5 top-5 z-20 flex items-center gap-3 rounded-full border border-white/12 bg-slate-950/30 py-2 pl-3 pr-4 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-cyan-100/35 bg-cyan-300/15 text-base font-black uppercase text-cyan-50 shadow-[0_0_24px_rgba(103,232,249,0.22)]">
-          {(nameInput.trim() || "N").slice(0, 1)}
+        <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-cyan-100/35 bg-cyan-300/15 text-base font-black uppercase text-cyan-50 shadow-[0_0_24px_rgba(103,232,249,0.22)]">
+          <img
+            src={profileCarAvatar}
+            alt="User profile"
+            className="h-full w-full object-cover"
+          />
         </div>
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">Username</p>

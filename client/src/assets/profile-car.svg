@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 681 465" role="img" aria-label="Blue race car profile picture">
+  <rect width="681" height="465" fill="#030506"/>
+  <g opacity=".38" stroke="#1b232a" stroke-width="3">
+    <path d="M56 0l7 185"/>
+    <path d="M197 0l5 190"/>
+    <path d="M343 0l2 193"/>
+    <path d="M503 0l-8 198"/>
+    <path d="M651 0l-5 190"/>
+  </g>
+  <g stroke-linecap="square" stroke-width="3.2">
+    <path d="M102 42l120-1" stroke="#5df8ff"/>
+    <path d="M318 12l125-2" stroke="#ce61ff"/>
+    <path d="M544 39l132-2" stroke="#5df8ff"/>
+    <path d="M461 9l14-13" stroke="#5df8ff" stroke-width="6"/>
+  </g>
+  <path d="M0 198h681v267H0z" fill="#dce3ea"/>
+  <path d="M0 198h335c54 2 109 5 164 5h182v262H0z" fill="#dbe2e9"/>
+  <path d="M0 274c91-19 202-25 326-22 112 3 224 11 355 5v208H0z" fill="#03293a"/>
+  <path d="M0 276c111-27 255-29 398-19 79 5 172 8 283 0" fill="none" stroke="#64e8ff" stroke-width="3" opacity=".8"/>
+  <g transform="translate(242 156)">
+    <ellipse cx="111" cy="260" rx="94" ry="13" fill="#03070a" opacity=".72"/>
+    <path d="M68 199c12 4 61 4 76 0l8 93c-27 11-73 11-92 0z" fill="#06090d"/>
+    <path d="M3 79c12-7 18-7 29-3h162c12-5 19-4 30 3l-2 10c-12 2-22 0-29-5H33c-9 6-20 7-31 4z" fill="#05080d"/>
+    <path d="M38 28c13-18 134-18 149 0l30 105c4 16 6 35 5 53l-7 44c-6 13-23 15-40 9l-8-47H56l-9 47c-17 6-34 4-40-9l-7-44c-1-18 1-37 5-53z" fill="#0048d5"/>
+    <path d="M44 19c20-17 127-18 142 0l8 8H37z" fill="#1789ff"/>
+    <path d="M47 38h134c11 13 17 36 21 61H26c5-26 11-48 21-61z" fill="#03070c"/>
+    <path d="M55 45h120c-14 13-31 21-51 24-31 4-56-4-69-24z" fill="#0d1825"/>
+    <path d="M61 48c7 15 19 22 35 21-3-9-13-16-35-21z" fill="#9aa3ad" opacity=".36"/>
+    <path d="M127 48c16 13 34 19 54 16-4-8-15-14-54-16z" fill="#9aa3ad" opacity=".28"/>
+    <rect x="83" y="101" width="61" height="26" rx="3" fill="#020205"/>
+    <path d="M14 96h58c-3 16-8 27-15 34H11z" fill="#08090d"/>
+    <path d="M154 96h58l3 34h-47c-7-7-12-18-14-34z" fill="#08090d"/>
+    <path d="M15 125h44" stroke="#23282e" stroke-width="3"/>
+    <path d="M169 125h43" stroke="#23282e" stroke-width="3"/>
+    <path d="M46 155h135" stroke="#11151a" stroke-width="8"/>
+    <path d="M70 159h86" stroke="#29323a" stroke-width="3"/>
+    <path d="M89 173h49" stroke="#07090d" stroke-width="10"/>
+    <path d="M76 195h75" stroke="#06080b" stroke-width="8"/>
+    <path d="M30 206c25 11 143 10 169 0" fill="none" stroke="#020407" stroke-width="12"/>
+    <path d="M76 184c5 8 70 9 75 0" fill="none" stroke="#98f2ff" stroke-width="3" opacity=".45"/>
+    <circle cx="107" cy="87" r="10" fill="#0c151e"/>
+    <circle cx="107" cy="87" r="5" fill="#3a4b58"/>
+    <path d="M-20 242c42-8 229-8 271 0" stroke="#974cff" stroke-width="2" opacity=".72"/>
+  </g>
+  <g transform="translate(-35 165) scale(.72)" opacity=".75">
+    <path d="M28 36c9-18 66-26 100-8l22 65-23 49-93-10L9 82z" fill="#e8f5ff"/>
+    <path d="M40 55c16-15 62-15 82-1l12 36H25z" fill="#153043"/>
+    <path d="M13 95c37 14 82 14 130 0l-10 34c-32 13-74 12-111 0z" fill="#68fff1"/>
+    <path d="M63 124h32" stroke="#842dff" stroke-width="8"/>
+  </g>
+  <ellipse cx="356" cy="374" rx="19" ry="59" fill="#76efff" opacity=".22"/>
+  <ellipse cx="356" cy="381" rx="9" ry="41" fill="#dffbff" opacity=".88"/>
+</svg>
