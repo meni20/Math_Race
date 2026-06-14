@@ -220,6 +220,13 @@ async function persistRaceHistoryIfNeeded(
   await markResultPersisted(admin, structuredClone(room), currentVersion, now);
 }
 
+function isTerminalClassroomRoom(room: GameRoomStateRecord) {
+  return Boolean(
+    room.teacherSessionId
+    && (room.endedAtMs || room.raceStopped || room.racePhase === "finish")
+  );
+}
+
 export async function runRoomMutation(
   admin: SupabaseClient,
   roomId: string,
@@ -261,7 +268,7 @@ export async function runRoomMutation(
     }
     await persistRaceHistoryIfNeeded(admin, result.room, savedVersion, now);
     await applyPresenceMutations(admin, result.presenceUpserts, result.presenceDeletes, now);
-    if (!result.skipClassroomSync) {
+    if (!result.skipClassroomSync || isTerminalClassroomRoom(result.room)) {
       await upsertClassroomRoomFromState(admin, result.room);
     }
     await applyRoomEvents(admin, roomId, result.roomEvents);

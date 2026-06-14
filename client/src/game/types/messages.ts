@@ -93,6 +93,7 @@ export interface PlayerSnapshot {
   wrongAnswers?: number;
   timeoutAnswers?: number;
   score?: number;
+  visualDriveMeters?: number;
   routeMode?: string;
   streak?: number;
   averageAnswerTimeMs?: number;
@@ -124,6 +125,7 @@ export interface QuestionMessage {
   routeMode?: string;
   operation?: string;
   prompt: string;
+  choices?: string[];
   difficulty: number;
   difficultyLabel?: string;
   timeLimitMs: number;

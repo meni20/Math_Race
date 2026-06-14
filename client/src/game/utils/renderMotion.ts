@@ -3,6 +3,13 @@ import type { DecisionChoiceRequest, PlayerSnapshot, QuestionMessage } from "../
 const DEFAULT_BASE_SPEED_MPS = 42;
 const CLASSROOM_BASE_SPEED_KMH = 60;
 const CLASSROOM_MODIFIER_DURATION_MS = 5000;
+const CLASSROOM_DEFAULT_TARGET_SCORE = 300;
+const CLASSROOM_VISUAL_TRACK_METERS = 720;
+const CLASSROOM_MIN_SPEED_KMH = 25;
+const CLASSROOM_MAX_SPEED_KMH = 180;
+const CLASSROOM_VISUAL_SPEED_MULTIPLIER = 2.1;
+const CLASSROOM_SPEED_SMOOTHING = 8;
+export const CLASSROOM_FINISH_GATE_PROGRESS_RATIO = 0.85;
 const MIN_SPEED_MPS = 18;
 const BOOST_EXTRA_SPEED_MPS = 30;
 const WRONG_ANSWER_SPEED_PENALTY_MPS = 7.5;
@@ -193,10 +200,17 @@ export function getRenderedPlayerSnapshot(
   const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
   const safeSpeedMps = clampSpeed(player.speedMps);
   const safePositionMeters = clampMeters(player.positionMeters, safeTrackLengthMeters);
+  const terminal = raceStopped || player.finished || player.racePhase === "finish";
+  if (terminal) {
+    return {
+      ...player,
+      positionMeters: player.finished ? safeTrackLengthMeters : safePositionMeters,
+      speedMps: 0
+    };
+  }
+
   const snapshotReceivedAtMs = syncMeta?.receivedAtMs ?? nowMs;
-  const snapshotAgeSeconds = raceStopped || player.finished
-    ? 0
-    : Math.max(0, nowMs - snapshotReceivedAtMs) / 1000;
+  const snapshotAgeSeconds = Math.max(0, nowMs - snapshotReceivedAtMs) / 1000;
 
   let predictedSpeedMps = safeSpeedMps;
   let predictedPositionMeters = safePositionMeters + (safeSpeedMps * snapshotAgeSeconds);
@@ -234,6 +248,7 @@ interface AdvanceRenderedPlayersArgs {
   classroomVisualMode?: boolean;
   answerFeedback?: ClassroomAnswerFeedbackMotion | null;
   trackLengthMeters: number;
+  classroomTargetScore?: number;
   raceStopped: boolean;
   nowMs: number;
   lastFrameAtMs: number;
@@ -262,33 +277,112 @@ function getClassroomModifierKmh(feedback: ClassroomAnswerFeedbackMotion | null 
   return 0;
 }
 
+function clampClassroomVisualSpeedKmh(value: number) {
+  if (!Number.isFinite(value)) {
+    return CLASSROOM_BASE_SPEED_KMH;
+  }
+  return Math.max(CLASSROOM_MIN_SPEED_KMH, Math.min(CLASSROOM_MAX_SPEED_KMH, value));
+}
+
+function normalizeClassroomTargetScore(targetScore: number | null | undefined) {
+  if (!Number.isFinite(targetScore ?? NaN)) {
+    return CLASSROOM_DEFAULT_TARGET_SCORE;
+  }
+  return Math.max(1, Math.trunc(targetScore ?? CLASSROOM_DEFAULT_TARGET_SCORE));
+}
+
+export function getClassroomScoreProgressRatio(
+  player: Pick<PlayerSnapshot, "score" | "finished"> | null | undefined,
+  targetScore: number | null | undefined
+) {
+  if (!player) {
+    return 0;
+  }
+  if (player.finished) {
+    return 1;
+  }
+  const safeTargetScore = normalizeClassroomTargetScore(targetScore);
+  const score = Math.max(0, Math.trunc(player.score ?? 0));
+  return Math.max(0, Math.min(1, score / safeTargetScore));
+}
+
+export function getClassroomVisualTrackMeters() {
+  return CLASSROOM_VISUAL_TRACK_METERS;
+}
+
+export function getClassroomScoreVisualPositionMeters(
+  player: Pick<PlayerSnapshot, "score" | "finished"> | null | undefined,
+  targetScore: number | null | undefined
+) {
+  return getClassroomScoreProgressRatio(player, targetScore) * CLASSROOM_VISUAL_TRACK_METERS;
+}
+
+export function getClassroomVisualDriveMeters(player: Pick<PlayerSnapshot, "positionMeters" | "visualDriveMeters"> | null | undefined) {
+  if (!player) {
+    return 0;
+  }
+  const visualDriveMeters = player.visualDriveMeters;
+  if (Number.isFinite(visualDriveMeters)) {
+    return Math.max(0, visualDriveMeters ?? 0);
+  }
+  return Math.max(0, player.positionMeters ?? 0);
+}
+
+export function shouldShowClassroomFinishGate(progressRatio: number, raceFinished: boolean) {
+  return raceFinished || Math.max(0, Math.min(1, progressRatio)) >= CLASSROOM_FINISH_GATE_PROGRESS_RATIO;
+}
+
 function advanceClassroomRenderedPlayer(
   previousPlayer: PlayerSnapshot | undefined,
   targetPlayer: PlayerSnapshot,
   deltaSeconds: number,
   isLocalPlayer: boolean,
   answerFeedback: ClassroomAnswerFeedbackMotion | null | undefined,
-  nowMs: number
+  nowMs: number,
+  raceStopped: boolean,
+  classroomTargetScore: number
 ) {
-  const authoritativeScorePosition = Math.max(
-    0,
-    Math.trunc(targetPlayer.score ?? targetPlayer.positionMeters ?? 0)
-  );
-  const previousPosition = previousPlayer
-    ? Math.max(previousPlayer.positionMeters, authoritativeScorePosition)
-    : authoritativeScorePosition;
+  const scoreProgressPosition = getClassroomScoreVisualPositionMeters(targetPlayer, classroomTargetScore);
+  const previousScoreProgressPosition = previousPlayer?.positionMeters ?? 0;
+  const previousVisualDriveMeters = previousPlayer
+    ? getClassroomVisualDriveMeters(previousPlayer)
+    : scoreProgressPosition;
+  const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
+  if (terminal) {
+    const terminalScoreProgressPosition = targetPlayer.finished
+      ? CLASSROOM_VISUAL_TRACK_METERS
+      : Math.max(previousScoreProgressPosition, scoreProgressPosition);
+    const terminalVisualDriveMeters = targetPlayer.finished
+      ? CLASSROOM_VISUAL_TRACK_METERS
+      : previousVisualDriveMeters;
+    return {
+      ...targetPlayer,
+      positionMeters: terminalScoreProgressPosition,
+      visualDriveMeters: terminalVisualDriveMeters,
+      speedMps: 0
+    };
+  }
+
   const modifierKmh = isLocalPlayer ? getClassroomModifierKmh(answerFeedback, nowMs) : 0;
-  const visualSpeedMps = Math.max(0, kmhToMps(CLASSROOM_BASE_SPEED_KMH + modifierKmh));
-  const advancedPosition = previousPosition + (visualSpeedMps * Math.max(0, deltaSeconds));
-  const finishedPosition = targetPlayer.finished
-    ? Math.max(advancedPosition, targetPlayer.positionMeters)
-    : advancedPosition;
+  const targetDisplaySpeedMps = kmhToMps(clampClassroomVisualSpeedKmh(CLASSROOM_BASE_SPEED_KMH + modifierKmh));
+  const previousDisplaySpeedMps = previousPlayer && previousPlayer.speedMps > 0
+    ? previousPlayer.speedMps
+    : targetDisplaySpeedMps;
+  const displaySpeedMps = dampScalar(
+    previousDisplaySpeedMps,
+    targetDisplaySpeedMps,
+    CLASSROOM_SPEED_SMOOTHING,
+    deltaSeconds
+  );
+  const effectiveVisualSpeedMps = displaySpeedMps * CLASSROOM_VISUAL_SPEED_MULTIPLIER;
+  const visualDriveMeters = previousVisualDriveMeters + (effectiveVisualSpeedMps * Math.max(0, deltaSeconds));
 
   return {
     ...targetPlayer,
-    lap: targetPlayer.finished ? targetPlayer.lap : 0,
-    positionMeters: Math.max(previousPosition, finishedPosition),
-    speedMps: targetPlayer.finished ? 0 : visualSpeedMps
+    lap: 0,
+    positionMeters: Math.max(previousScoreProgressPosition, scoreProgressPosition),
+    visualDriveMeters,
+    speedMps: displaySpeedMps
   };
 }
 
@@ -323,8 +417,21 @@ function advanceRenderedPlayer(
   previousPlayer: PlayerSnapshot | undefined,
   targetPlayer: PlayerSnapshot,
   deltaSeconds: number,
-  trackLengthMeters: number
+  trackLengthMeters: number,
+  raceStopped: boolean
 ) {
+  const safeTrackLengthMeters = Math.max(1, trackLengthMeters);
+  const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
+  if (terminal) {
+    return {
+      ...targetPlayer,
+      positionMeters: targetPlayer.finished
+        ? safeTrackLengthMeters
+        : clampMeters(targetPlayer.positionMeters, safeTrackLengthMeters),
+      speedMps: 0
+    };
+  }
+
   if (!previousPlayer) {
     return targetPlayer;
   }
@@ -365,6 +472,7 @@ export function advanceRenderedPlayers({
   classroomVisualMode = false,
   answerFeedback,
   trackLengthMeters,
+  classroomTargetScore,
   raceStopped,
   nowMs,
   lastFrameAtMs
@@ -401,7 +509,9 @@ export function advanceRenderedPlayers({
         deltaSeconds,
         currentPlayerId === localPlayerId,
         answerFeedback,
-        nowMs
+        nowMs,
+        raceStopped,
+        normalizeClassroomTargetScore(classroomTargetScore ?? trackLengthMeters)
       );
       continue;
     }
@@ -410,7 +520,8 @@ export function advanceRenderedPlayers({
       previousPlayers[currentPlayerId],
       targetPlayer,
       deltaSeconds,
-      trackLengthMeters
+      trackLengthMeters,
+      raceStopped
     );
   }
 

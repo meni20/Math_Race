@@ -1,7 +1,7 @@
 import { generateArithmeticQuestion } from "../questions/questionEngine";
 import { advanceQuestionStateAfterAnswer, chooseRoute, createInitialPlayerQuestionState } from "../questions/questionStateMachine";
 import { scoreAnswer } from "../questions/scoringEngine";
-import { getSoloBotAnswerProfile, normalizeSoloBotCount, SOLO_BOT_OPTIONS } from "./demoRace";
+import { getSoloBotAnswerProfile, isSoloScoreTargetReached, normalizeSoloBotCount, SOLO_BOT_OPTIONS } from "./demoRace";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -24,6 +24,9 @@ export function runSoloRaceTests() {
 
   const targetScore = 20;
   assert(Math.min(targetScore, scoreAnswer(normal, "CORRECT").pointsDelta) >= targetScore, "Solo finish occurs when score reaches targetScore.");
+  assert(isSoloScoreTargetReached(20, targetScore), "Solo score target helper finishes at targetScore.");
+  assert(!isSoloScoreTargetReached(19, targetScore), "Solo score target helper does not finish below targetScore.");
+  assert(!isSoloScoreTargetReached(299, 300), "Solo finish is not determined by distance or visual track position.");
 
   let state = createInitialPlayerQuestionState();
   let routeChoiceOpened = false;

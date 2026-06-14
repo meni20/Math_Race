@@ -12,6 +12,26 @@ function randomInt(minInclusive: number, maxInclusive: number) {
   return minInclusive + Math.floor(Math.random() * ((maxInclusive - minInclusive) + 1));
 }
 
+function buildChoices(correctAnswer: number) {
+  const choices = new Set<string>([String(correctAnswer)]);
+  for (const offset of [1, -1, 2, -2, 3, -3, 5, -5, 10, -10]) {
+    if (choices.size >= 4) {
+      break;
+    }
+    const candidate = correctAnswer + offset;
+    if (candidate >= 0 && candidate !== correctAnswer) {
+      choices.add(String(candidate));
+    }
+  }
+  while (choices.size < 4) {
+    const candidate = Math.max(0, correctAnswer + randomInt(-8, 8));
+    if (candidate !== correctAnswer) {
+      choices.add(String(candidate));
+    }
+  }
+  return [...choices].sort(() => Math.random() - 0.5);
+}
+
 const EASY_TEMPLATES: QuestionTemplate[] = [
   {
     pattern: "{a} + {b}",
@@ -80,11 +100,13 @@ export function generateQuestion(difficulty: number): GeneratedQuestionRecord {
     .replace("{a}", String(a))
     .replace("{b}", String(b))
     .replace("{c}", String(c));
+  const correctAnswer = template.evaluator(a, b, c);
 
   return {
     questionId: crypto.randomUUID(),
     prompt,
-    correctAnswer: String(template.evaluator(a, b, c)),
+    correctAnswer: String(correctAnswer),
+    choices: buildChoices(correctAnswer),
     difficulty: boundedDifficulty,
     timeLimitMs: template.timeLimitMs,
     boostMultiplier: template.boostMultiplier

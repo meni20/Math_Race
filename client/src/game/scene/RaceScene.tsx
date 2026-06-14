@@ -9,14 +9,22 @@ import { useGameStore } from "../store/useGameStore";
 import type { TrackTheme } from "../types/messages";
 import { DEFAULT_CAR_ID } from "../utils/carSelection";
 import {
+  CLASSROOM_FINISH_GATE_PROGRESS_RATIO,
   getDistanceToFinishMeters,
+  getClassroomScoreProgressRatio,
+  getClassroomVisualDriveMeters,
+  getClassroomVisualTrackMeters,
   getPlayerProgressRatio,
-  isPlayerOnFinalLap
+  isPlayerOnFinalLap,
+  shouldShowClassroomFinishGate
 } from "../utils/renderMotion";
 import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRenderedPlayers";
 import { GARAGE_CARS, getGarageCarById, type GarageCar } from "../utils/carCatalog";
+import { isSoloRoomId } from "../utils/gameIds";
+import { getSoloLocalCenteredLaneX } from "../utils/soloLane";
 
 const TRACK_Z_SCALE = 0.24;
+const CLASSROOM_WORLD_REPEAT_Z = 300;
 const LANE_WIDTH = 1.22;
 const MAX_LANE_INDEX = 7;
 const RACE_START_TRANSITION_MS = 2600;
@@ -186,6 +194,81 @@ function laneToX(laneIndex: number) {
   return (normalizedLane - (MAX_LANE_INDEX / 2)) * LANE_WIDTH;
 }
 
+const soloRenderLaneIndexByPlayerId = new Map<string, number>();
+
+function getNextAvailableSoloLaneIndex() {
+  const usedLaneIndices = new Set(soloRenderLaneIndexByPlayerId.values());
+  let laneIndex = 0;
+  while (usedLaneIndices.has(laneIndex)) {
+    laneIndex += 1;
+  }
+  return laneIndex;
+}
+
+function getStableRenderOnlySoloLaneIndex(playerId: string, playerIds: string[], localPlayerId: string) {
+  if (soloRenderLaneIndexByPlayerId.has(playerId)) {
+    return soloRenderLaneIndexByPlayerId.get(playerId) ?? 0;
+  }
+
+  const activeIds = new Set(playerIds);
+  if (localPlayerId) {
+    activeIds.add(localPlayerId);
+  }
+  for (const mappedPlayerId of soloRenderLaneIndexByPlayerId.keys()) {
+    if (!activeIds.has(mappedPlayerId)) {
+      soloRenderLaneIndexByPlayerId.delete(mappedPlayerId);
+    }
+  }
+
+  const stableIds = [
+    ...(localPlayerId ? [localPlayerId] : []),
+    ...playerIds.filter((entry) => entry !== localPlayerId).sort((left, right) => left.localeCompare(right))
+  ];
+  for (const stableId of stableIds) {
+    if (!soloRenderLaneIndexByPlayerId.has(stableId)) {
+      soloRenderLaneIndexByPlayerId.set(stableId, getNextAvailableSoloLaneIndex());
+    }
+  }
+
+  if (!soloRenderLaneIndexByPlayerId.has(playerId)) {
+    soloRenderLaneIndexByPlayerId.set(playerId, getNextAvailableSoloLaneIndex());
+  }
+  return soloRenderLaneIndexByPlayerId.get(playerId) ?? 0;
+}
+
+function resolveRaceLaneIndex(
+  playerId: string,
+  laneIndex: number | null | undefined,
+  playerIds: string[],
+  localPlayerId: string,
+  soloSession: boolean
+) {
+  if (Number.isFinite(laneIndex)) {
+    return Math.max(0, Math.trunc(laneIndex ?? 0));
+  }
+  if (!soloSession) {
+    return 0;
+  }
+  return getStableRenderOnlySoloLaneIndex(playerId, playerIds, localPlayerId);
+}
+
+function raceLaneToX(
+  playerId: string,
+  laneIndex: number | null | undefined,
+  playerIds: string[],
+  localPlayerId: string,
+  localLaneIndex: number | null | undefined,
+  sessionMode: string,
+  roomId: string
+) {
+  const soloSession = sessionMode === "solo" || isSoloRoomId(roomId);
+  const resolvedLaneIndex = resolveRaceLaneIndex(playerId, laneIndex, playerIds, localPlayerId, soloSession);
+  const resolvedLocalLaneIndex = resolveRaceLaneIndex(localPlayerId, localLaneIndex, playerIds, localPlayerId, soloSession);
+  return soloSession
+    ? getSoloLocalCenteredLaneX(resolvedLaneIndex, Math.max(1, playerIds.length), resolvedLocalLaneIndex)
+    : laneToX(resolvedLaneIndex);
+}
+
 function hashColor(playerId: string) {
   let hash = 0;
   for (let i = 0; i < playerId.length; i += 1) {
@@ -220,7 +303,7 @@ function getStartTransitionProgress(racePhase: string, raceStartingAtMs: number,
 function getLobbyToTrackTransform(
   slotIndex: number,
   totalPlayers: number,
-  laneIndex: number,
+  laneX: number,
   racePhase: string,
   raceStartingAtMs: number,
   nowMs: number
@@ -231,13 +314,28 @@ function getLobbyToTrackTransform(
   return {
     progress: transitionProgress,
     easedProgress,
-    x: MathUtils.lerp(lobbyX, laneToX(laneIndex), easedProgress),
+    x: MathUtils.lerp(lobbyX, laneX, easedProgress),
     y: MathUtils.lerp(lobbyY, RACE_CAR_GROUND_Y, easedProgress),
     z: MathUtils.lerp(lobbyZ, 0, easedProgress),
     lobbyX,
     lobbyY,
     lobbyZ
   };
+}
+
+function isClassroomVisualMode(sessionMode: string, roomCreatorPlayerId: string) {
+  return sessionMode === "shared" && roomCreatorPlayerId === "";
+}
+
+function normalizeClassroomTargetScore(targetScore: number | null | undefined) {
+  if (!Number.isFinite(targetScore ?? NaN)) {
+    return 300;
+  }
+  return Math.max(1, Math.trunc(targetScore ?? 300));
+}
+
+function getClassroomDriveZ(player: Parameters<typeof getClassroomVisualDriveMeters>[0]) {
+  return -getClassroomVisualDriveMeters(player) * TRACK_Z_SCALE;
 }
 
 const GARAGE_CAR_TARGET_LENGTH = 5;
@@ -848,9 +946,54 @@ export function MenuScene() {
   );
 }
 
+function getInitialCarPosition(playerId: string, slotIndex: number, totalPlayers: number): [number, number, number] {
+  const state = useGameStore.getState();
+  const player = state.players[playerId];
+  const renderedPlayer = getRenderedPlayersSnapshot().players[playerId];
+  const laneX = raceLaneToX(
+    playerId,
+    renderedPlayer?.laneIndex ?? player?.laneIndex,
+    state.playerIds,
+    state.playerId,
+    state.players[state.playerId]?.laneIndex,
+    state.sessionMode,
+    state.roomId
+  );
+
+  if (!player) {
+    return [laneX, RACE_CAR_GROUND_Y, 0];
+  }
+
+  const playerRacePhase = renderedPlayer?.racePhase ?? player.racePhase ?? state.racePhase;
+  if (playerRacePhase === "lobby" || playerRacePhase === "starting") {
+    const transform = getLobbyToTrackTransform(
+      slotIndex,
+      totalPlayers,
+      laneX,
+      playerRacePhase,
+      state.raceStartingAtMs,
+      Date.now()
+    );
+    return [transform.x, transform.y, transform.z];
+  }
+
+  const classroomVisualMode = isClassroomVisualMode(state.sessionMode, state.roomCreatorPlayerId);
+  const drivePlayer = renderedPlayer ?? player;
+  return [
+    laneX,
+    RACE_CAR_GROUND_Y,
+    classroomVisualMode ? getClassroomDriveZ(drivePlayer) : -drivePlayer.positionMeters * TRACK_Z_SCALE
+  ];
+}
+
 function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; slotIndex: number; totalPlayers: number }) {
   const groupRef = useRef<Group>(null);
   const glowRef = useRef<PointLight>(null);
+  const transformInitializedRef = useRef(false);
+  const initialPositionRef = useRef<[number, number, number] | null>(null);
+  if (initialPositionRef.current === null) {
+    initialPositionRef.current = getInitialCarPosition(playerId, slotIndex, totalPlayers);
+  }
   const localPlayerId = useGameStore((state) => state.playerId);
   const displayName = useGameStore((state) => state.players[playerId]?.displayName ?? "Driver");
   const carId = useGameStore((state) => state.players[playerId]?.carId ?? DEFAULT_CAR_ID);
@@ -881,12 +1024,21 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
     let targetYaw = 0;
     let targetScaleZ = 1;
     let lightIntensity = 0.22;
+    const laneX = raceLaneToX(
+      playerId,
+      renderedPlayer?.laneIndex ?? player.laneIndex,
+      state.playerIds,
+      state.playerId,
+      state.players[state.playerId]?.laneIndex,
+      state.sessionMode,
+      state.roomId
+    );
 
     if (playerRacePhase === "lobby" || playerRacePhase === "starting") {
       const transform = getLobbyToTrackTransform(
         slotIndex,
         totalPlayers,
-        player.laneIndex,
+        laneX,
         playerRacePhase,
         state.raceStartingAtMs,
         nowMs
@@ -899,22 +1051,33 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
       targetPitch = MathUtils.lerp(0.02, 0, transform.easedProgress);
       lightIntensity = 0.16 + (transform.progress * 0.08);
     } else if (renderedPlayer) {
-      targetX = laneToX(renderedPlayer.laneIndex);
+      const classroomVisualMode = isClassroomVisualMode(state.sessionMode, state.roomCreatorPlayerId);
+      targetX = laneX;
       targetY = RACE_CAR_GROUND_Y;
-      targetZ = -renderedPlayer.positionMeters * TRACK_Z_SCALE;
+      targetZ = classroomVisualMode
+        ? getClassroomDriveZ(renderedPlayer)
+        : -renderedPlayer.positionMeters * TRACK_Z_SCALE;
       targetPitch = Math.min(0.04, renderedPlayer.speedMps / 3000);
       targetScaleZ = 1 + Math.min(0.45, renderedPlayer.speedMps / 200);
       lightIntensity = 0.24;
     }
 
-    groupRef.current.position.set(
-      MathUtils.damp(groupRef.current.position.x, targetX, 7.5, delta),
-      MathUtils.damp(groupRef.current.position.y, targetY, 7.5, delta),
-      MathUtils.damp(groupRef.current.position.z, targetZ, 7.5, delta)
-    );
-    groupRef.current.rotation.x = MathUtils.damp(groupRef.current.rotation.x, targetPitch, 7.5, delta);
-    groupRef.current.rotation.y = MathUtils.damp(groupRef.current.rotation.y, targetYaw, 7.5, delta);
-    groupRef.current.scale.z = MathUtils.damp(groupRef.current.scale.z, targetScaleZ, 7.5, delta);
+    if (!transformInitializedRef.current) {
+      groupRef.current.position.set(targetX, targetY, targetZ);
+      groupRef.current.rotation.x = targetPitch;
+      groupRef.current.rotation.y = targetYaw;
+      groupRef.current.scale.z = targetScaleZ;
+      transformInitializedRef.current = true;
+    } else {
+      groupRef.current.position.set(
+        MathUtils.damp(groupRef.current.position.x, targetX, 7.5, delta),
+        MathUtils.damp(groupRef.current.position.y, targetY, 7.5, delta),
+        MathUtils.damp(groupRef.current.position.z, targetZ, 7.5, delta)
+      );
+      groupRef.current.rotation.x = MathUtils.damp(groupRef.current.rotation.x, targetPitch, 7.5, delta);
+      groupRef.current.rotation.y = MathUtils.damp(groupRef.current.rotation.y, targetYaw, 7.5, delta);
+      groupRef.current.scale.z = MathUtils.damp(groupRef.current.scale.z, targetScaleZ, 7.5, delta);
+    }
 
     if (glowRef.current) {
       glowRef.current.intensity = MathUtils.damp(glowRef.current.intensity, lightIntensity, 5.5, delta);
@@ -922,7 +1085,7 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
   });
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} position={initialPositionRef.current ?? [0, RACE_CAR_GROUND_Y, 0]}>
       <GarageCarModel name={car.name} url={car.url} visualRotationY={car.visualRotationY} />
       <Billboard position={[0, 2.05, 0]} follow>
         <group renderOrder={12}>
@@ -1510,6 +1673,44 @@ function EnvironmentManager({ theme }: { theme: TrackTheme }) {
   );
 }
 
+function ClassroomRepeatingWorld({ environment, theme }: { environment: EnvironmentConfig; theme: TrackTheme }) {
+  const { localPlayer } = useRenderedPlayers();
+  const driveZ = getClassroomDriveZ(localPlayer);
+  const baseZ = Math.round(driveZ / CLASSROOM_WORLD_REPEAT_Z) * CLASSROOM_WORLD_REPEAT_Z;
+  const offsets = useMemo(() => [-2, -1, 0, 1, 2], []);
+
+  return (
+    <>
+      {offsets.map((offset) => {
+        const z = baseZ + offset * CLASSROOM_WORLD_REPEAT_Z;
+        return (
+          <group key={`classroom-world-${theme}-${z}`} position={[0, 0, z]}>
+            <NeonTrack environment={environment} />
+            <EnvironmentManager theme={theme} />
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+function RaceWorld({ environment, theme }: { environment: EnvironmentConfig; theme: TrackTheme }) {
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
+  const classroomVisualMode = isClassroomVisualMode(sessionMode, roomCreatorPlayerId);
+
+  if (classroomVisualMode) {
+    return <ClassroomRepeatingWorld environment={environment} theme={theme} />;
+  }
+
+  return (
+    <>
+      <NeonTrack environment={environment} />
+      <EnvironmentManager theme={theme} />
+    </>
+  );
+}
+
 function NeonTrack({ environment }: { environment: EnvironmentConfig }) {
   const dashSegments = useMemo(
     () => Array.from({ length: 340 }, (_, index) => -(index * 6)),
@@ -1663,7 +1864,10 @@ function SideProgressMarkers({ environment }: { environment: EnvironmentConfig }
   const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
   const { localPlayer } = useRenderedPlayers();
+  const classroomVisualMode = isClassroomVisualMode(sessionMode, roomCreatorPlayerId);
   const markers = useMemo(
     () =>
       Array.from({ length: 10 }, (_, index) => {
@@ -1680,7 +1884,7 @@ function SideProgressMarkers({ environment }: { environment: EnvironmentConfig }
     [trackLengthMeters]
   );
 
-  if (racePhase !== "active" && racePhase !== "finish") {
+  if (classroomVisualMode || (racePhase !== "active" && racePhase !== "finish")) {
     return null;
   }
 
@@ -1756,20 +1960,37 @@ function FinishGate({ environment }: { environment: EnvironmentConfig }) {
   const racePhase = useGameStore((state) => state.racePhase);
   const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
   const totalLaps = useGameStore((state) => state.totalLaps);
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
+  const targetScore = useGameStore((state) => state.roomSettings.targetScore);
   const { localPlayer } = useRenderedPlayers();
   const glowRef = useRef<PointLight>(null);
-  const gateVisible = racePhase === "active" || racePhase === "finish";
   const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
+  const classroomVisualMode = isClassroomVisualMode(sessionMode, roomCreatorPlayerId);
 
-  const progressRatio = getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
-  const distanceToFinishMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
-  const gateApproachFactor = MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
-  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
+  const progressRatio = classroomVisualMode
+    ? getClassroomScoreProgressRatio(localPlayer, normalizeClassroomTargetScore(targetScore))
+    : getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
   const raceFinished = Boolean(localPlayer && (localPlayer.finished || progressRatio >= 0.999));
+  const gateVisible = (racePhase === "active" || racePhase === "finish")
+    && (!classroomVisualMode || shouldShowClassroomFinishGate(progressRatio, raceFinished));
+  const distanceToFinishMeters = classroomVisualMode ? 0 : getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
+  const gateApproachFactor = classroomVisualMode
+    ? MathUtils.clamp(
+      (progressRatio - CLASSROOM_FINISH_GATE_PROGRESS_RATIO) / Math.max(0.01, 1 - CLASSROOM_FINISH_GATE_PROGRESS_RATIO),
+      0,
+      1
+    )
+    : MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
+  const finalLapActive = classroomVisualMode
+    ? progressRatio >= CLASSROOM_FINISH_GATE_PROGRESS_RATIO
+    : isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
   const gateColor = raceFinished ? environment.progressFinish : finalLapActive ? environment.accent : environment.sideLane;
   const supportColor = raceFinished ? environment.progressFinish : finalLapActive ? environment.accent : environment.lobbyBar;
   const haloOpacity = raceFinished ? 0.12 : finalLapActive ? 0.08 + gateApproachFactor * 0.04 : 0.06 + gateApproachFactor * 0.02;
-  const gateZ = -trackLengthMeters * TRACK_Z_SCALE;
+  const gateZ = classroomVisualMode
+    ? getClassroomDriveZ(localPlayer) - MathUtils.lerp(58, 8, gateApproachFactor)
+    : -trackLengthMeters * TRACK_Z_SCALE;
 
   useFrame(({ clock }) => {
     if (!gateVisible || !glowRef.current) {
@@ -1877,10 +2098,19 @@ function CameraRig() {
     const nowMs = Date.now();
     if (game.racePhase === "lobby" || game.racePhase === "starting") {
       const slotIndex = Math.max(0, game.playerIds.indexOf(game.playerId));
+      const laneX = raceLaneToX(
+        game.playerId,
+        localPlayer.laneIndex,
+        game.playerIds,
+        game.playerId,
+        localPlayer.laneIndex,
+        game.sessionMode,
+        game.roomId
+      );
       const transform = getLobbyToTrackTransform(
         slotIndex,
         Math.max(1, game.playerIds.length),
-        localPlayer.laneIndex,
+        laneX,
         game.racePhase,
         game.raceStartingAtMs,
         nowMs
@@ -1916,8 +2146,19 @@ function CameraRig() {
     }
 
     const speedFactor = Math.min(1.0, renderedLocalPlayer.speedMps / 110);
-    const targetX = laneToX(renderedLocalPlayer.laneIndex);
-    const targetZ = -renderedLocalPlayer.positionMeters * TRACK_Z_SCALE;
+    const targetX = raceLaneToX(
+      renderedLocalPlayer.playerId,
+      renderedLocalPlayer.laneIndex,
+      game.playerIds,
+      game.playerId,
+      renderedLocalPlayer.laneIndex,
+      game.sessionMode,
+      game.roomId
+    );
+    const classroomVisualMode = isClassroomVisualMode(game.sessionMode, game.roomCreatorPlayerId);
+    const targetZ = classroomVisualMode
+      ? getClassroomDriveZ(renderedLocalPlayer)
+      : -renderedLocalPlayer.positionMeters * TRACK_Z_SCALE;
 
     desiredCameraRef.current.set(
       targetX * 0.55,
@@ -2023,8 +2264,7 @@ export function RaceScene() {
         />
       ))}
 
-      <NeonTrack environment={environment} />
-      <EnvironmentManager theme={trackTheme} />
+      <RaceWorld environment={environment} theme={trackTheme} />
       <StadiumAtmosphereAudio />
       <LobbyBay environment={environment} />
       <SideProgressMarkers environment={environment} />

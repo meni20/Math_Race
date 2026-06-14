@@ -18,24 +18,24 @@ interface TeacherRaceHeaderProps {
 
 function phaseLabel(snapshot: TeacherRoomSnapshot | null) {
   if (!snapshot) {
-    return "Setup";
+    return "הגדרה";
   }
   if (snapshot.lifecycleStatus === "CLOSED") {
-    return "Closed";
+    return "סגור";
   }
   if (snapshot.lifecycleStatus === "DELETED") {
-    return "Deleted";
+    return "נמחק";
   }
   if (snapshot.racePhase === "active") {
-    return "Racing";
+    return "במרוץ";
   }
   if (snapshot.racePhase === "starting") {
-    return "Starting";
+    return "מתחיל";
   }
   if (snapshot.racePhase === "finish") {
-    return "Finished";
+    return "הסתיים";
   }
-  return "Waiting";
+  return "ממתין";
 }
 
 export function TeacherRaceHeader({
@@ -60,29 +60,29 @@ export function TeacherRaceHeader({
     <header className="rounded-lg border border-white/10 bg-white/[0.045] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100/70">Teacher Dashboard</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100/70">לוח מורה</p>
           <h1 className="mt-0.5 truncate text-xl font-black text-white sm:text-2xl">{title}</h1>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {snapshot ? <HeaderPill label="Room" value={snapshot.roomId} tone="cyan" /> : null}
-          <HeaderPill label="Status" value={phaseLabel(snapshot)} />
-          <HeaderPill label="Target" value={targetLabel} />
-          <HeaderPill label="Students" value={`${playerCount}/${maxPlayers}`} />
-          <HeaderPill label="Link" value={connectionLabel} />
+          {snapshot ? <HeaderPill label="חדר" value={snapshot.roomId} tone="cyan" /> : null}
+          <HeaderPill label="סטטוס" value={phaseLabel(snapshot)} />
+          <HeaderPill label="יעד" value={targetLabel} />
+          <HeaderPill label="תלמידים" value={`${playerCount}/${maxPlayers}`} />
+          <HeaderPill label="חיבור" value={connectionLabel} />
           {localDev ? (
             <span className="rounded-full border border-cyan-100/15 bg-cyan-300/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">
-              Local Dev
+              פיתוח מקומי
             </span>
           ) : null}
           <button type="button" onClick={onOpenRooms} className="rounded-full border border-white/12 bg-white/[0.07] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white transition hover:bg-white/[0.12]">
-            Rooms
+            חדרים
           </button>
           <button type="button" onClick={onStudentMode} className="rounded-full border border-cyan-100/20 bg-cyan-300/10 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/16">
-            Student Mode
+            מצב תלמיד
           </button>
           <button type="button" onClick={onNewRoom} className="rounded-full border border-white/12 bg-white/[0.07] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white transition hover:bg-white/[0.12]">
-            New
+            חדש
           </button>
           {snapshot ? (
             <>
@@ -92,7 +92,7 @@ export function TeacherRaceHeader({
                 disabled={!canStart}
                 className="rounded-full border border-emerald-200/35 bg-emerald-400/14 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-50 transition hover:bg-emerald-400/22 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Start
+                התחל
               </button>
               <button
                 type="button"
@@ -100,7 +100,7 @@ export function TeacherRaceHeader({
                 disabled={roomIsTerminal}
                 className="rounded-full border border-rose-200/30 bg-rose-500/12 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                End
+                סיים
               </button>
               <button
                 type="button"
@@ -108,7 +108,7 @@ export function TeacherRaceHeader({
                 disabled={roomIsTerminal}
                 className="rounded-full border border-amber-200/25 bg-amber-300/10 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-amber-100 transition hover:bg-amber-300/18 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Close View
+                סגור תצוגה
               </button>
             </>
           ) : null}

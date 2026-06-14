@@ -29,15 +29,15 @@ function DebugOverlay() {
 
   return (
     <section className="pointer-events-none absolute right-4 top-4 z-30 rounded-xl border border-lime-300/45 bg-slate-950/78 px-3 py-2 text-xs text-lime-100 backdrop-blur">
-      <p>connection: {connection}</p>
-      <p>room: {roomId || "-"}</p>
-      <p>player: {playerId || "-"}</p>
-      <p>phase: {racePhase}</p>
-      <p>players: {playerIds.length}</p>
-      <p>local present: {localPlayer ? "yes" : "no"}</p>
-      <p>lane: {localPlayer?.laneIndex ?? "-"}</p>
-      <p>position: {localPlayer?.positionMeters ?? "-"}</p>
-      <p>speed: {localPlayer?.speedMps ?? "-"}</p>
+      <p>חיבור: {connection}</p>
+      <p>חדר: {roomId || "-"}</p>
+      <p>שחקן: {playerId || "-"}</p>
+      <p>שלב: {racePhase}</p>
+      <p>שחקנים: {playerIds.length}</p>
+      <p>שחקן מקומי: {localPlayer ? "כן" : "לא"}</p>
+      <p>מסלול: {localPlayer?.laneIndex ?? "-"}</p>
+      <p>מיקום: {localPlayer?.positionMeters ?? "-"}</p>
+      <p>מהירות: {localPlayer?.speedMps ?? "-"}</p>
     </section>
   );
 }
@@ -88,7 +88,7 @@ function App() {
     const roomId = normalizeRoomId(params.get("room")?.trim() || "arena-1");
     const persistedSession = gameSocket.getPersistedWebsocketSession();
     const canResumePersisted = persistedSession?.roomId === roomId;
-    const displayName = params.get("name")?.trim() || (canResumePersisted ? persistedSession.displayName : "Debug Racer");
+    const displayName = params.get("name")?.trim() || (canResumePersisted ? persistedSession.displayName : "נהג בדיקה");
     const playerId = normalizePlayerId(params.get("player")?.trim() || (canResumePersisted ? persistedSession.playerId : "p-debug-1"));
 
     autoJoinAttemptedRef.current = true;
@@ -96,31 +96,31 @@ function App() {
       if (getClassroomAdapterInfo().mode === "supabase") {
         const room = await getClassroomRoomService().getRoomByCode(roomId).catch(() => null);
         if (!room) {
-          useGameStore.getState().setConnection("error", "Room not found or not available.");
+          useGameStore.getState().setConnection("error", "החדר לא נמצא או אינו זמין.");
           return;
         }
         if (room.status === "DELETED" || room.deletedAt) {
-          useGameStore.getState().setConnection("error", "This room is no longer available.");
+          useGameStore.getState().setConnection("error", "החדר הזה כבר לא זמין.");
           return;
         }
         if (room.status === "CLOSED" || room.closedAt) {
-          useGameStore.getState().setConnection("error", "This room was closed by the teacher.");
+          useGameStore.getState().setConnection("error", "החדר נסגר על ידי המורה.");
           return;
         }
         if (room.status === "FINISHED" || room.endedAt) {
-          useGameStore.getState().setConnection("error", "This race has finished.");
+          useGameStore.getState().setConnection("error", "המרוץ הזה הסתיים.");
           return;
         }
         if (!room.isListed || room.isLocked) {
-          useGameStore.getState().setConnection("error", "This room is not currently available.");
+          useGameStore.getState().setConnection("error", "החדר אינו זמין כרגע.");
           return;
         }
         if (room.currentPlayers >= room.maxPlayers) {
-          useGameStore.getState().setConnection("error", "Room is full.");
+          useGameStore.getState().setConnection("error", "החדר מלא.");
           return;
         }
         if (room.status !== "WAITING" && !(room.status === "RACING" && room.allowMidGameJoin)) {
-          useGameStore.getState().setConnection("error", "This room is not joinable right now.");
+          useGameStore.getState().setConnection("error", "אי אפשר להצטרף לחדר כרגע.");
           return;
         }
       }
@@ -141,7 +141,7 @@ function App() {
   const showResults = racePhase === "finish" || raceStopped;
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-[linear-gradient(145deg,#071a38_0%,#082342_42%,#020817_100%)] text-slate-100">
+    <main dir="rtl" className="relative h-screen w-screen overflow-hidden bg-[linear-gradient(145deg,#071a38_0%,#082342_42%,#020817_100%)] text-slate-100">
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,8,23,0.58)_0%,rgba(2,8,23,0.34)_28%,rgba(2,8,23,0)_62%),linear-gradient(180deg,rgba(148,203,213,0.05),rgba(2,8,23,0.18))]" />
       {showTeacherDashboard ? null : (showMenuScene ? <MenuScene /> : <RaceScene />)}
       {showTeacherDashboard || showResults ? null : <LobbyPanel />}

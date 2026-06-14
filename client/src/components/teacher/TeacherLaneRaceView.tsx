@@ -16,11 +16,11 @@ export function TeacherLaneRaceView({ players, laneCount = 8 }: TeacherLaneRaceV
     <section className="rounded-lg border border-white/10 bg-slate-950/44 p-3 shadow-[0_18px_50px_rgba(2,8,23,0.24)]">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/70">Live Race Lanes</p>
-          <h2 className="text-lg font-black text-white">Classroom Track</h2>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/70">מסלולי מרוץ חיים</p>
+          <h2 className="text-lg font-black text-white">מסלול הכיתה</h2>
         </div>
         <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-slate-200">
-          {players.length}/{laneCount} active
+          {players.length}/{laneCount} פעילים
         </span>
       </div>
 

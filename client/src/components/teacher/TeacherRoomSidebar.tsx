@@ -31,6 +31,28 @@ function statusTone(status: TeacherRoomSummary["status"]) {
   return "border-slate-100/15 bg-white/6 text-slate-200";
 }
 
+function statusLabel(status: TeacherRoomSummary["status"]) {
+  if (status === "DRAFT") {
+    return "טיוטה";
+  }
+  if (status === "CREATED") {
+    return "נוצר";
+  }
+  if (status === "WAITING") {
+    return "ממתין";
+  }
+  if (status === "RACING") {
+    return "במרוץ";
+  }
+  if (status === "FINISHED") {
+    return "הסתיים";
+  }
+  if (status === "CLOSED") {
+    return "נסגר";
+  }
+  return "נמחק";
+}
+
 function RoomButton({
   room,
   selected,
@@ -48,13 +70,13 @@ function RoomButton({
         <span className="block truncate text-sm font-black text-white">{room.raceName}</span>
         <span className="mt-1 flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.1em] text-cyan-100/75">
           <span>{room.roomCode}</span>
-          <span className={`rounded-full border px-2 py-0.5 ${statusTone(room.status)}`}>{room.status}</span>
+          <span className={`rounded-full border px-2 py-0.5 ${statusTone(room.status)}`}>{statusLabel(room.status)}</span>
         </span>
         <span className="mt-1 block text-xs text-slate-300">
-          {room.currentPlayers}/{room.maxPlayers} students · {formatDate(room.createdAt)}
+          {room.currentPlayers}/{room.maxPlayers} תלמידים · {formatDate(room.createdAt)}
         </span>
-        {room.startedAt ? <span className="mt-1 block text-[11px] text-slate-400">Started {formatDate(room.startedAt)}</span> : null}
-        {room.endedAt ? <span className="mt-1 block text-[11px] text-slate-400">Ended {formatDate(room.endedAt)}</span> : null}
+        {room.startedAt ? <span className="mt-1 block text-[11px] text-slate-400">התחיל {formatDate(room.startedAt)}</span> : null}
+        {room.endedAt ? <span className="mt-1 block text-[11px] text-slate-400">הסתיים {formatDate(room.endedAt)}</span> : null}
       </button>
       <div className="mt-2 flex gap-2">
         <button
@@ -62,7 +84,7 @@ function RoomButton({
           onClick={() => onDeleteRoom(room.roomCode)}
           className="flex-1 rounded-md border border-rose-200/25 bg-rose-500/12 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-500/20"
         >
-          Delete
+          מחק
         </button>
       </div>
     </div>
@@ -86,7 +108,7 @@ export function TeacherRoomSidebar({
       <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/70">{title}</p>
       <div className="grid gap-2">
         {groupRooms.length === 0 ? (
-          <p className="rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-400">No rooms</p>
+          <p className="rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-400">אין חדרים</p>
         ) : groupRooms.map((room) => (
           <RoomButton
             key={room.id || room.roomCode}
@@ -104,20 +126,20 @@ export function TeacherRoomSidebar({
     <aside className="shrink-0 border-b border-white/10 pb-4 lg:w-72 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">Rooms</p>
-          <p className="mt-1 text-xs text-slate-400">{loading ? "Refreshing..." : `${rooms.length} saved`}</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">חדרים</p>
+          <p className="mt-1 text-xs text-slate-400">{loading ? "מרענן..." : `${rooms.length} שמורים`}</p>
         </div>
         <button
           type="button"
           onClick={onNewRoom}
           className="rounded-full border border-cyan-100/30 bg-cyan-300/12 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/20"
         >
-          New
+          חדש
         </button>
       </div>
-      {renderGroup("Active Rooms", activeRooms)}
-      {renderGroup("Running Rooms", runningRooms)}
-      {renderGroup("Previous Rooms", previousRooms)}
+      {renderGroup("חדרים פעילים", activeRooms)}
+      {renderGroup("חדרים רצים", runningRooms)}
+      {renderGroup("חדרים קודמים", previousRooms)}
     </aside>
   );
 }

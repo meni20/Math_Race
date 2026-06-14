@@ -7,11 +7,11 @@ interface TeacherRaceStatsProps {
 export function TeacherRaceStats({ stats }: TeacherRaceStatsProps) {
   return (
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      <StatCard label="Class accuracy" value={stats.classAccuracy === null ? "-" : `${stats.classAccuracy}%`} />
-      <StatCard label="Total answers" value={stats.totalAnswers} />
-      <StatCard label="Avg response" value={stats.averageResponseTimeMs ? `${(stats.averageResponseTimeMs / 1000).toFixed(1)}s` : "-"} />
-      <StatCard label="Students" value={stats.totalStudents} />
-      <StatCard label="Live events" value={stats.liveEventsCount} />
+      <StatCard label="דיוק כיתתי" value={stats.classAccuracy === null ? "-" : `${stats.classAccuracy}%`} />
+      <StatCard label={'סה"כ תשובות'} value={stats.totalAnswers} />
+      <StatCard label="תגובה ממוצעת" value={stats.averageResponseTimeMs ? `${(stats.averageResponseTimeMs / 1000).toFixed(1)} שניות` : "-"} />
+      <StatCard label="תלמידים" value={stats.totalStudents} />
+      <StatCard label="אירועים חיים" value={stats.liveEventsCount} />
     </section>
   );
 }

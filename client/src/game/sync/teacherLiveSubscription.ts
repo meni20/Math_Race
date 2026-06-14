@@ -123,7 +123,7 @@ export function connectTeacherRoomLiveUpdates({
             if (update) {
               lastEventAtMs = Date.now();
               parseFailureCount = 0;
-              if (!connected && (update.event === "room_snapshot" || update.event === "heartbeat")) {
+              if (!connected && (update.event === "room_snapshot" || update.event === "heartbeat" || update.event === "room_event")) {
                 connected = true;
                 onConnected?.(update);
               }

@@ -40,6 +40,59 @@ function randomInt(rng: Rng, minInclusive: number, maxInclusive: number) {
   return minInclusive + Math.floor(boundedRandom(rng) * ((maxInclusive - minInclusive) + 1));
 }
 
+function shuffleChoices(values: string[], rng: Rng) {
+  const shuffled = [...values];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomInt(rng, 0, index);
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function buildAnswerChoices(correctAnswer: number, rng: Rng) {
+  const choices = new Set<string>([String(correctAnswer)]);
+  const magnitude = Math.max(4, Math.abs(correctAnswer));
+  const smallStep = Math.max(1, Math.round(magnitude * 0.1));
+  const mediumStep = Math.max(2, Math.round(magnitude * 0.2));
+  const candidateOffsets = [
+    1,
+    -1,
+    2,
+    -2,
+    3,
+    -3,
+    5,
+    -5,
+    smallStep,
+    -smallStep,
+    mediumStep,
+    -mediumStep,
+    10,
+    -10
+  ];
+
+  for (const offset of candidateOffsets) {
+    const candidate = correctAnswer + offset;
+    if (choices.size >= 4) {
+      break;
+    }
+    if (Number.isInteger(candidate) && candidate >= 0 && candidate !== correctAnswer) {
+      choices.add(String(candidate));
+    }
+  }
+
+  while (choices.size < 4) {
+    const delta = randomInt(rng, 1, Math.max(6, mediumStep + 4));
+    const direction = boundedRandom(rng) < 0.5 ? -1 : 1;
+    const candidate = Math.max(0, correctAnswer + (delta * direction));
+    if (candidate !== correctAnswer) {
+      choices.add(String(candidate));
+    }
+  }
+
+  return shuffleChoices([...choices], rng);
+}
+
 function pickOperation(rng: Rng, operation?: Operation): Exclude<Operation, "MIXED"> {
   if (operation && operation !== "MIXED") {
     return operation;
@@ -49,11 +102,12 @@ function pickOperation(rng: Rng, operation?: Operation): Exclude<Operation, "MIX
 }
 
 function withScoring(
-  partial: Omit<RaceQuestionPrivate, "id" | "acceptedAnswers" | "pointsCorrect" | "pointsWrong" | "pointsTimeout" | "createdAtMs" | "expiresAtMs">,
+  partial: Omit<RaceQuestionPrivate, "id" | "acceptedAnswers" | "choices" | "pointsCorrect" | "pointsWrong" | "pointsTimeout" | "createdAtMs" | "expiresAtMs">,
   options: GenerateQuestionOptions,
   timeLimitSeconds: number
 ): RaceQuestionPrivate {
   const routeMode = options.routeMode ?? "NORMAL";
+  const rng = options.rng ?? Math.random;
   const createdAtMs = options.nowMs ?? Date.now();
   const scoring = SCORING_CONFIG[routeMode];
   const resolvedTimeLimitSeconds = routeMode === "HIGHWAY"
@@ -68,6 +122,7 @@ function withScoring(
     id: options.id ?? randomId(),
     routeMode,
     acceptedAnswers: [String(partial.correctAnswer)],
+    choices: buildAnswerChoices(partial.correctAnswer, rng),
     timeLimitSeconds: resolvedTimeLimitSeconds,
     pointsCorrect: scoring.CORRECT,
     pointsWrong: scoring.WRONG,
@@ -179,7 +234,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const first = randomInt(rng, 5, 24);
       const more = randomInt(rng, 3, 12);
       return {
-        prompt: `Roni collected ${first} stickers and then got ${more} more. How many stickers does Roni have now?`,
+        prompt: `רוני אסף ${first} מדבקות ואז קיבל עוד ${more}. כמה מדבקות יש לרוני עכשיו?`,
         correctAnswer: first + more
       };
     }
@@ -192,7 +247,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const total = randomInt(rng, 12, 30);
       const used = randomInt(rng, 1, total);
       return {
-        prompt: `A class had ${total} pencils. ${used} pencils were used. How many pencils are left?`,
+        prompt: `בכיתה היו ${total} עפרונות. השתמשו ב-${used} עפרונות. כמה עפרונות נשארו?`,
         correctAnswer: total - used
       };
     }
@@ -205,7 +260,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const perBox = randomInt(rng, 2, 10);
       const boxes = randomInt(rng, 2, 10);
       return {
-        prompt: `Each box has ${perBox} apples. There are ${boxes} boxes. How many apples are there?`,
+        prompt: `בכל קופסה יש ${perBox} תפוחים. יש ${boxes} קופסאות. כמה תפוחים יש בסך הכל?`,
         correctAnswer: perBox * boxes
       };
     }
@@ -218,7 +273,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const students = randomInt(rng, 2, 10);
       const each = randomInt(rng, 2, 10);
       return {
-        prompt: `${students * each} candies are shared equally between ${students} students. How many candies does each student get?`,
+        prompt: `מחלקים ${students * each} סוכריות שווה בשווה בין ${students} תלמידים. כמה סוכריות יקבל כל תלמיד?`,
         correctAnswer: each
       };
     }
@@ -232,7 +287,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const perShelf = randomInt(rng, 6, 14);
       const extra = randomInt(rng, 10, 35);
       return {
-        prompt: `A library put ${perShelf} books on each of ${shelves} shelves, then added ${extra} more books. How many books are there?`,
+        prompt: `בספרייה שמו ${perShelf} ספרים על כל אחד מ-${shelves} מדפים, ואז הוסיפו עוד ${extra} ספרים. כמה ספרים יש בסך הכל?`,
         correctAnswer: (shelves * perShelf) + extra
       };
     }
@@ -246,7 +301,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const seats = randomInt(rng, 8, 15);
       const empty = randomInt(rng, 5, 24);
       return {
-        prompt: `There are ${rows} rows with ${seats} seats in each row. ${empty} seats are empty. How many seats are filled?`,
+        prompt: `יש ${rows} שורות עם ${seats} מושבים בכל שורה. ${empty} מושבים ריקים. כמה מושבים תפוסים?`,
         correctAnswer: (rows * seats) - empty
       };
     }
@@ -261,7 +316,7 @@ const WORD_PROBLEM_TEMPLATES: WordProblemTemplate[] = [
       const sold = randomInt(rng, 30, 90);
       const bonus = randomInt(rng, 10, 40);
       return {
-        prompt: `A shop received ${crates} crates with ${perCrate} oranges in each crate, sold ${sold} oranges, then received ${bonus} more. How many oranges are in the shop now?`,
+        prompt: `חנות קיבלה ${crates} ארגזים עם ${perCrate} תפוזים בכל ארגז, מכרה ${sold} תפוזים, ואז קיבלה עוד ${bonus}. כמה תפוזים יש עכשיו בחנות?`,
         correctAnswer: (crates * perCrate) - sold + bonus
       };
     }

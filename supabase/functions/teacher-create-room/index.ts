@@ -72,8 +72,8 @@ function normalizeMapId(value: unknown) {
 function normalizeTargetScore(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue)
-    ? Math.max(100, Math.min(5000, Math.trunc(numberValue)))
-    : 500;
+    ? Math.max(50, Math.min(10000, Math.trunc(numberValue)))
+    : 300;
 }
 
 function normalizeRoomSettings(payload: TeacherCreateRoomRequest) {

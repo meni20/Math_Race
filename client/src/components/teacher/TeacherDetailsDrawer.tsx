@@ -33,22 +33,22 @@ export function TeacherDetailsDrawer({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/72 backdrop-blur-sm">
-      <button type="button" aria-label="Close details drawer" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <button type="button" aria-label="סגור פרטים" className="absolute inset-0 cursor-default" onClick={onClose} />
       <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-slate-950 p-4 shadow-[-20px_0_60px_rgba(0,0,0,0.35)]">
         <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">Race Details</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">פרטי המרוץ</p>
             <h2 className="text-xl font-black text-white">{tabLabel(tab)}</h2>
           </div>
           <button type="button" onClick={onClose} className="rounded-full border border-white/12 bg-white/6 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-white transition hover:bg-white/10">
-            Close
+            סגור
           </button>
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">
-          <TabButton label="Leaderboard" active={tab === "leaderboard"} onClick={() => onTabChange("leaderboard")} />
-          <TabButton label="Students" active={tab === "students"} onClick={() => onTabChange("students")} />
-          <TabButton label="Events" active={tab === "events"} onClick={() => onTabChange("events")} />
+          <TabButton label="מובילים" active={tab === "leaderboard"} onClick={() => onTabChange("leaderboard")} />
+          <TabButton label="תלמידים" active={tab === "students"} onClick={() => onTabChange("students")} />
+          <TabButton label="אירועים" active={tab === "events"} onClick={() => onTabChange("events")} />
         </div>
 
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
@@ -88,14 +88,14 @@ function EventsPanel({ events }: { events: TeacherEvent[] }) {
   return (
     <section className="rounded-lg border border-white/10 bg-white/6 p-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-white">Live Events</h2>
+        <h2 className="text-lg font-black text-white">אירועים חיים</h2>
         <span className="rounded-full border border-white/10 bg-white/6 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-200">
           {events.length}
         </span>
       </div>
       <div className="mt-3 grid gap-2">
         {events.length === 0 ? (
-          <p className="rounded-lg bg-slate-950/28 px-3 py-3 text-sm text-slate-300">Events will appear as students join, answer, and change rank.</p>
+          <p className="rounded-lg bg-slate-950/28 px-3 py-3 text-sm text-slate-300">אירועים יופיעו כשתלמידים יצטרפו, יענו וישנו מיקום.</p>
         ) : events.map((event) => (
           <div key={event.id} className="rounded-lg border border-white/10 bg-slate-950/34 px-3 py-2">
             <div className="flex items-center justify-between gap-3">
@@ -112,10 +112,10 @@ function EventsPanel({ events }: { events: TeacherEvent[] }) {
 
 function tabLabel(tab: TeacherDetailsTab) {
   if (tab === "students") {
-    return "Students";
+    return "תלמידים";
   }
   if (tab === "events") {
-    return "Live Events";
+    return "אירועים חיים";
   }
-  return "Leaderboard";
+  return "לוח מובילים";
 }
