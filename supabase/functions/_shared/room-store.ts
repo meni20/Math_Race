@@ -8,6 +8,7 @@ import type {
   GameRoomStateRecord,
   RoomMutationResult
 } from "./contracts.ts";
+import { insertRoomEvent, upsertClassroomRoomFromState } from "./classroom-store.ts";
 import { buildRaceHistoryRow } from "./game-core.ts";
 
 const ROOM_TABLE = "game_rooms";
@@ -160,6 +161,19 @@ async function applyPresenceMutations(
   }
 }
 
+async function applyRoomEvents(
+  admin: SupabaseClient,
+  roomId: string,
+  roomEvents: RoomMutationResult["roomEvents"] | undefined
+) {
+  if (!roomEvents || roomEvents.length === 0) {
+    return;
+  }
+  for (const event of roomEvents) {
+    await insertRoomEvent(admin, roomId, event.eventType, event.payload ?? {});
+  }
+}
+
 async function markResultPersisted(
   admin: SupabaseClient,
   room: GameRoomStateRecord,
@@ -223,6 +237,7 @@ export async function runRoomMutation(
 
     if (!result.persist || !result.room) {
       await applyPresenceMutations(admin, result.presenceUpserts, result.presenceDeletes, now);
+      await applyRoomEvents(admin, roomId, result.roomEvents);
       return {
         room: result.room,
         version: current?.version ?? 0,
@@ -246,6 +261,10 @@ export async function runRoomMutation(
     }
     await persistRaceHistoryIfNeeded(admin, result.room, savedVersion, now);
     await applyPresenceMutations(admin, result.presenceUpserts, result.presenceDeletes, now);
+    if (!result.skipClassroomSync) {
+      await upsertClassroomRoomFromState(admin, result.room);
+    }
+    await applyRoomEvents(admin, roomId, result.roomEvents);
 
     return {
       room: result.room,

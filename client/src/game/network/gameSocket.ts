@@ -1,7 +1,7 @@
 import { Client, StompSubscription } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { useGameStore } from "../store/useGameStore";
-import { normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
+import { isSoloRoomId, normalizePlayerId, normalizeRoomId } from "../utils/gameIds";
 import { normalizeCarId } from "../utils/carSelection";
 import type {
   AnswerFeedbackMessage,
@@ -37,8 +37,8 @@ interface StoredWebsocketSession {
   carId?: CarId;
 }
 
-function canUseSessionStorage() {
-  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
+function canUsePersistentStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
 function buildRandomToken(prefix: string) {
@@ -49,40 +49,40 @@ function buildRandomToken(prefix: string) {
 }
 
 function getOrCreateWebsocketResumeToken() {
-  if (!canUseSessionStorage()) {
+  if (!canUsePersistentStorage()) {
     return buildRandomToken("ws-resume-");
   }
 
-  const existing = window.sessionStorage.getItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY)?.trim();
+  const existing = window.localStorage.getItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY)?.trim();
   if (existing) {
     return existing;
   }
 
   const nextToken = buildRandomToken("ws-resume-");
-  window.sessionStorage.setItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY, nextToken);
+  window.localStorage.setItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY, nextToken);
   return nextToken;
 }
 
 function persistWebsocketSession(payload: StoredWebsocketSession) {
-  if (!canUseSessionStorage()) {
+  if (!canUsePersistentStorage()) {
     return;
   }
-  window.sessionStorage.setItem(WEBSOCKET_SESSION_STORAGE_KEY, JSON.stringify(payload));
+  window.localStorage.setItem(WEBSOCKET_SESSION_STORAGE_KEY, JSON.stringify(payload));
 }
 
 function clearPersistedWebsocketSession() {
-  if (!canUseSessionStorage()) {
+  if (!canUsePersistentStorage()) {
     return;
   }
-  window.sessionStorage.removeItem(WEBSOCKET_SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(WEBSOCKET_SESSION_STORAGE_KEY);
 }
 
 function readPersistedWebsocketSession(): ConnectPayload | null {
-  if (!canUseSessionStorage()) {
+  if (!canUsePersistentStorage()) {
     return null;
   }
 
-  const raw = window.sessionStorage.getItem(WEBSOCKET_SESSION_STORAGE_KEY);
+  const raw = window.localStorage.getItem(WEBSOCKET_SESSION_STORAGE_KEY);
   if (!raw) {
     return null;
   }
@@ -121,16 +121,15 @@ class GameSocketClient {
     return this.lifecycle;
   }
 
-  submitAnswer(answer: string) {
-    const transport = getConfiguredGameTransport();
+  submitAnswer(answer: string, timeout = false) {
+    const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
-      useGameStore.getState().beginLocalAnswerPrediction(answer);
-      void this.supabaseClient.submitAnswer(answer);
+      void this.supabaseClient.submitAnswer(answer, timeout);
       return;
     }
 
     if (transport === "demo") {
-      this.demoClient.submitAnswer(answer);
+      this.demoClient.submitAnswer(answer, timeout);
       return;
     }
 
@@ -144,7 +143,8 @@ class GameSocketClient {
       roomId: state.roomId,
       playerId: state.playerId,
       questionId: state.question.questionId,
-      answer
+      answer,
+      timeout
     };
     this.client.publish({
       destination: "/app/game.answer",
@@ -153,7 +153,7 @@ class GameSocketClient {
   }
 
   submitDecision(choice: "HIGHWAY" | "DIRT") {
-    const transport = getConfiguredGameTransport();
+    const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       useGameStore.getState().beginLocalDecisionPrediction(choice);
       void this.supabaseClient.submitDecision(choice);
@@ -184,7 +184,7 @@ class GameSocketClient {
   }
 
   startRace() {
-    const transport = getConfiguredGameTransport();
+    const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       void this.supabaseClient.startRace();
       return;
@@ -210,7 +210,7 @@ class GameSocketClient {
   }
 
   updateRoomSettings(roomSettings: RoomSettings) {
-    const transport = getConfiguredGameTransport();
+    const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       void this.supabaseClient.updateRoomSettings(roomSettings);
       return;
@@ -236,8 +236,25 @@ class GameSocketClient {
     });
   }
 
+  setReady(ready: boolean) {
+    const state = useGameStore.getState();
+    if (state.sessionMode === "shared" && state.roomCreatorPlayerId === "") {
+      return;
+    }
+    const transport = this.getRuntimeTransport();
+    if (transport === "supabase") {
+      void this.supabaseClient.setReady(ready);
+      return;
+    }
+    if (transport === "demo") {
+      this.demoClient.setReady(ready);
+      return;
+    }
+    // Supabase/WebSocket ready-state support is pending backend deployment.
+  }
+
   returnToLobby() {
-    const transport = getConfiguredGameTransport();
+    const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       void this.supabaseClient.returnToLobby();
       return;
@@ -355,16 +372,29 @@ class GameSocketClient {
     await this.deactivateCurrentClient(false);
     this.intentionalDisconnect = false;
     useGameStore.getState().setConnection("connecting");
+    const normalizedPayload: ConnectPayload = {
+      ...payload,
+      roomId: normalizeRoomId(payload.roomId) || payload.roomId.trim(),
+      playerId: normalizePlayerId(payload.playerId) || payload.playerId.trim(),
+      displayName: payload.displayName.trim(),
+      carId: normalizeCarId(payload.carId)
+    };
+    persistWebsocketSession({
+      roomId: normalizedPayload.roomId,
+      playerId: normalizedPayload.playerId,
+      displayName: normalizedPayload.displayName,
+      carId: normalizedPayload.carId
+    });
 
-    const transport = getConfiguredGameTransport();
+    const transport = this.getRuntimeTransport(normalizedPayload);
     if (transport === "supabase") {
-      await this.supabaseClient.connect(payload);
+      await this.supabaseClient.connect(normalizedPayload);
       return;
     }
 
     const backendUrl = getGameBackendUrl();
     if (!backendUrl) {
-      await this.demoClient.connect(payload);
+      await this.demoClient.connect(normalizedPayload);
       return;
     }
 
@@ -423,6 +453,19 @@ class GameSocketClient {
     client.activate();
   }
 
+  private getRuntimeTransport(payload?: ConnectPayload) {
+    const payloadRoomId = payload?.roomId ? normalizeRoomId(payload.roomId) : "";
+    const state = useGameStore.getState();
+    if (
+      (payloadRoomId && isSoloRoomId(payloadRoomId)) ||
+      state.sessionMode === "solo" ||
+      (state.roomId && isSoloRoomId(state.roomId))
+    ) {
+      return "demo";
+    }
+    return getConfiguredGameTransport();
+  }
+
   private async disconnectInternal(resetSession: boolean) {
     await this.supabaseClient.disconnect();
     await this.demoClient.disconnect();
@@ -459,7 +502,6 @@ class GameSocketClient {
     this.stopWebsocketSyncLoop();
     await this.deactivateCurrentClient(true);
 
-    clearPersistedWebsocketSession();
     useGameStore.getState().setConnection("idle");
     useGameStore.getState().resetSession();
   }

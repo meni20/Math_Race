@@ -52,6 +52,10 @@ export function FinishOverlay() {
     return Object.values(players)
       .filter((player) => player.racePhase !== "lobby" || player.finished)
       .sort((a, b) => {
+        const scoreDelta = Math.max(0, Math.trunc(b.score ?? 0)) - Math.max(0, Math.trunc(a.score ?? 0));
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
         return (
           getPlayerRaceDistanceMeters(b, trackLengthMeters, totalLaps)
           - getPlayerRaceDistanceMeters(a, trackLengthMeters, totalLaps)
@@ -90,7 +94,7 @@ export function FinishOverlay() {
         </div>
 
         <p className="mt-4 text-sm text-slate-200/90">
-          Race stopped when the finish line was reached.
+          Race stopped when a racer reached the target score.
         </p>
 
         <div className="mt-4 rounded-xl border border-slate-700/70 bg-slate-950/55 p-4">
@@ -101,8 +105,8 @@ export function FinishOverlay() {
                 <tr>
                   <th className="pb-2">#</th>
                   <th className="pb-2">Driver</th>
-                  <th className="pb-2">Lap</th>
-                  <th className="pb-2">Position</th>
+                  <th className="pb-2">Score</th>
+                  <th className="pb-2">Progress</th>
                   <th className="pb-2">Status</th>
                 </tr>
               </thead>
@@ -113,7 +117,7 @@ export function FinishOverlay() {
                     <tr key={player.playerId} className={isWinner ? "text-emerald-200" : "text-slate-100"}>
                       <td className="py-1.5 pr-2">{index + 1}</td>
                       <td className="py-1.5 pr-2">{player.displayName}</td>
-                      <td className="py-1.5 pr-2">L{Math.min(totalLaps, player.lap + 1)}</td>
+                      <td className="py-1.5 pr-2">{Math.max(0, Math.trunc(player.score ?? 0))}</td>
                       <td className="py-1.5 pr-2">{formatMeters(player.positionMeters)}</td>
                       <td className="py-1.5 pr-2">{isWinner ? "Winner" : "Stopped"}</td>
                     </tr>

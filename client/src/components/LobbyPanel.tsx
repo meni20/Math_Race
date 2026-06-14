@@ -1,13 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { TrackTheme } from "../game/types/messages";
 import { gameSocket } from "../game/network/gameSocket";
+import { StudentClassroomHud } from "./StudentClassroomHud";
+import { getClassroomAdapterInfo, getClassroomRoomService, listActiveClassroomRooms, type ClassroomRoomSummary } from "../game/network/classroomRooms";
 import { isDemoTransportConfigured } from "../game/network/transportConfig";
 import { useGameStore } from "../game/store/useGameStore";
+import { getActiveSyncDebugState } from "../game/sync/syncLifecycle";
 import { GARAGE_CARS } from "../game/utils/carCatalog";
 import { normalizeRoomId } from "../game/utils/gameIds";
 import {
   areRoomSettingsEqual,
-  formatDurationLabel,
+  MAX_ROOM_PLAYERS,
   normalizeRoomSettings
 } from "../game/utils/roomSettings";
 
@@ -20,6 +23,21 @@ function buildPlayerId() {
 
 function buildSoloRoomId(playerId: string) {
   return `solo-${playerId}`;
+}
+
+function getInitialRoomInput() {
+  if (typeof window === "undefined") {
+    return "arena-1";
+  }
+  const roomFromUrl = new URLSearchParams(window.location.search).get("room")?.trim();
+  return roomFromUrl || "arena-1";
+}
+
+function hasRoomInUrl() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return Boolean(new URLSearchParams(window.location.search).get("room")?.trim());
 }
 
 function formatCountdown(ms: number) {
@@ -81,22 +99,35 @@ export function LobbyPanel() {
   const selectCar = useGameStore((state) => state.selectCar);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
 
-  const [roomInput, setRoomInput] = useState(roomId || "arena-1");
+  const [roomInput, setRoomInput] = useState(roomId || getInitialRoomInput());
   const [nameInput, setNameInput] = useState(displayName || "Neon Racer");
   const [roomSettingsDraft, setRoomSettingsDraft] = useState(roomSettings);
   const [nowMs, setNowMs] = useState(Date.now());
-  const [joinBoxOpen, setJoinBoxOpen] = useState(false);
+  const [joinBoxOpen, setJoinBoxOpen] = useState(hasRoomInUrl());
   const [mapModalOpen, setMapModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeLobbies, setActiveLobbies] = useState<ClassroomRoomSummary[]>([]);
+  const [activeLobbyError, setActiveLobbyError] = useState("");
+  const [soloSetupOpen, setSoloSetupOpen] = useState(false);
+  const [soloBotCount, setSoloBotCount] = useState(2);
+  const [soloDifficulty, setSoloDifficulty] = useState<"EASY" | "MEDIUM" | "HARD">("MEDIUM");
+  const [soloTargetScore, setSoloTargetScore] = useState(500);
   const connecting = connection === "connecting";
   const connected = connection === "connected";
   const demoMode = isDemoTransportConfigured();
+  const classroomAdapterInfo = useMemo(() => getClassroomAdapterInfo(), []);
   const inRoomLobbyFlow = connected && sessionMode !== "personal" && (racePhase === "lobby" || racePhase === "starting");
   const isActiveRace = connected && racePhase === "active";
   const isSharedSession = sessionMode === "shared";
+  const isClassroomSession = isSharedSession && roomCreatorPlayerId === "";
+  const localPlayer = playerId ? players[playerId] : undefined;
+  const syncDebug = import.meta.env.DEV ? getActiveSyncDebugState() : null;
+  const studentSyncDebug = syncDebug?.active.find((entry) => entry.role === "student");
 
   useEffect(() => {
-    setRoomInput(roomId || "arena-1");
+    if (roomId) {
+      setRoomInput(roomId);
+    }
   }, [roomId]);
 
   useEffect(() => {
@@ -108,9 +139,9 @@ export function LobbyPanel() {
   }, [
     roomId,
     roomSettings.raceName,
-    roomSettings.maxPlayers,
-    roomSettings.raceDurationSeconds,
-    roomSettings.questionTimeLimitSeconds
+    roomSettings.targetScore,
+    roomSettings.mapId,
+    roomSettings.difficulty
   ]);
 
   useEffect(() => {
@@ -122,6 +153,31 @@ export function LobbyPanel() {
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 100);
     return () => window.clearInterval(intervalId);
   }, [racePhase]);
+
+  const refreshActiveClassrooms = () => {
+    return listActiveClassroomRooms()
+      .then((rooms) => {
+        setActiveLobbies(rooms);
+        setActiveLobbyError("");
+      })
+      .catch((error) => {
+        setActiveLobbies([]);
+        setActiveLobbyError(error instanceof Error ? error.message : "Unable to load active classrooms.");
+      });
+  };
+
+  useEffect(() => {
+    if (!joinBoxOpen) {
+      return undefined;
+    }
+    void refreshActiveClassrooms();
+    const intervalId = window.setInterval(() => {
+      void refreshActiveClassrooms();
+    }, 3000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [joinBoxOpen]);
 
   const badgeClass = useMemo(() => {
     if (connection === "connected") {
@@ -153,39 +209,100 @@ export function LobbyPanel() {
       .map((currentPlayerId) => players[currentPlayerId])
       .filter((player): player is NonNullable<typeof player> => Boolean(player));
   }, [playerIds, players]);
-  const creatorDisplayName = useMemo(() => {
-    if (roomCreatorPlayerId === playerId) {
-      return "You";
-    }
-    return roster.find((player) => player.playerId === roomCreatorPlayerId)?.displayName ?? "Waiting";
-  }, [playerId, roomCreatorPlayerId, roster]);
+  const hostPlayerId = roster[0]?.playerId ?? roomCreatorPlayerId;
 
   const minimumMaxPlayers = isSharedSession && demoMode
     ? 2
-    : Math.max(2, Math.min(4, roster.length || 2));
+    : Math.max(2, Math.min(MAX_ROOM_PLAYERS, roster.length || 2));
   const normalizedRoomSettingsDraft = useMemo(
     () => normalizeRoomSettings(roomId, roomSettingsDraft, minimumMaxPlayers),
     [minimumMaxPlayers, roomId, roomSettingsDraft]
   );
-  const isRoomCreator = isSharedSession && playerId === roomCreatorPlayerId;
-  const canEditRoomSettings = isRoomCreator && racePhase === "lobby" && roomRacePhase === "lobby";
+  const isRoomHost = isSharedSession && playerId === hostPlayerId;
+  const canEditRoomSettings = isRoomHost && racePhase === "lobby" && roomRacePhase === "lobby";
   const showRoomSettingsEditor = canEditRoomSettings;
   const roomSettingsDirty = !areRoomSettingsEqual(normalizedRoomSettingsDraft, roomSettings);
   const currentTrackIndex = Math.max(0, TRACK_THEME_OPTIONS.findIndex((option) => option.value === trackTheme));
   const currentTrack = TRACK_THEME_OPTIONS[currentTrackIndex] ?? TRACK_THEME_OPTIONS[0];
   const selectedCarIndex = Math.max(0, GARAGE_CARS.findIndex((car) => car.id === selectedCarId));
+  const localRank = useMemo(() => {
+    if (!playerId || roster.length === 0) {
+      return null;
+    }
+    const ordered = [...roster].sort((left, right) => {
+      const scoreDelta = Math.max(0, Math.trunc(right.score ?? 0)) - Math.max(0, Math.trunc(left.score ?? 0));
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      return right.positionMeters - left.positionMeters || left.playerId.localeCompare(right.playerId);
+    });
+    const index = ordered.findIndex((player) => player.playerId === playerId);
+    return index >= 0 ? index + 1 : null;
+  }, [playerId, roster]);
 
   const onJoin = (event: FormEvent) => {
     event.preventDefault();
+    void joinRoom(roomInput);
+  };
+
+  const joinRoom = async (roomCode: string) => {
     if (connecting || !nameInput.trim()) {
       return;
     }
+    if (classroomAdapterInfo.mode === "unavailable") {
+      setActiveLobbyError(classroomAdapterInfo.message);
+      setJoinBoxOpen(true);
+      return;
+    }
 
-    const normalizedRoomId = normalizeRoomId(roomInput.trim() || "arena-1");
+    const normalizedRoomId = normalizeRoomId(roomCode.trim() || "arena-1").toUpperCase();
     if (!normalizedRoomId) {
       return;
     }
-    const nextPlayerId = playerId || buildPlayerId();
+    const room = await getClassroomRoomService().getRoomByCode(normalizedRoomId);
+    if (!room) {
+      setActiveLobbyError("Room not found or not available.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (room.status === "DELETED" || room.deletedAt) {
+      setActiveLobbyError("This room is no longer available.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (room.status === "CLOSED" || room.closedAt) {
+      setActiveLobbyError("This room was closed by the teacher.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (room.status === "FINISHED" || room.endedAt) {
+      setActiveLobbyError("This race has finished.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (!room.isListed) {
+      setActiveLobbyError("This room is not currently available.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (room.isLocked) {
+      setActiveLobbyError("Registration is locked.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    const persistedSession = gameSocket.getPersistedWebsocketSession();
+    const isResumeAttempt = persistedSession?.roomId === normalizedRoomId;
+    if (room.currentPlayers >= room.maxPlayers && !isResumeAttempt) {
+      setActiveLobbyError("Room is full.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    if (room.status !== "WAITING" && !(room.status === "RACING" && room.allowMidGameJoin)) {
+      setActiveLobbyError("This room is not joinable right now.");
+      setJoinBoxOpen(true);
+      return;
+    }
+    const nextPlayerId = isResumeAttempt ? persistedSession.playerId : (playerId || buildPlayerId());
     prepareJoin(normalizedRoomId, nameInput, nextPlayerId);
     gameSocket.connect({
       roomId: normalizedRoomId,
@@ -201,6 +318,10 @@ export function LobbyPanel() {
   };
 
   const onExitRace = () => {
+    if (isClassroomSession) {
+      void gameSocket.leaveRoom();
+      return;
+    }
     if (isSharedSession) {
       gameSocket.returnToLobby();
       return;
@@ -209,6 +330,11 @@ export function LobbyPanel() {
   };
 
   const onPlaySolo = () => {
+    setSoloSetupOpen(true);
+    setJoinBoxOpen(false);
+  };
+
+  const startSoloRace = () => {
     if (connecting || !nameInput.trim()) {
       return;
     }
@@ -221,8 +347,19 @@ export function LobbyPanel() {
       roomId: soloRoomId,
       displayName: nameInput.trim(),
       playerId: nextPlayerId,
-      carId: selectedCarId
+      carId: selectedCarId,
+      roomSettings: {
+        raceName: "Solo Race",
+        maxPlayers: Math.max(1, Math.min(4, soloBotCount + 1)),
+        raceDurationSeconds: 180,
+        questionTimeLimitSeconds: 15,
+        targetScore: soloTargetScore,
+        difficulty: soloDifficulty,
+        operations: "MIXED"
+      },
+      soloBotCount
     });
+    setSoloSetupOpen(false);
   };
 
   const onStartRace = () => {
@@ -240,7 +377,9 @@ export function LobbyPanel() {
   };
   const cycleTrackTheme = (direction: -1 | 1) => {
     const nextIndex = (currentTrackIndex + direction + TRACK_THEME_OPTIONS.length) % TRACK_THEME_OPTIONS.length;
-    changeEnvironment(TRACK_THEME_OPTIONS[nextIndex].value);
+    const nextTheme = TRACK_THEME_OPTIONS[nextIndex].value;
+    changeEnvironment(nextTheme);
+    setRoomSettingsDraft((current) => ({ ...current, mapId: nextTheme }));
   };
   const cycleGarageCar = (direction: -1 | 1) => {
     const total = GARAGE_CARS.length;
@@ -250,8 +389,28 @@ export function LobbyPanel() {
 
   const allPlayersInLobby = roster.length > 0 && roster.every((player) => player.racePhase === "lobby");
   const canStartRace = racePhase === "lobby" && (!isSharedSession || (roomRacePhase === "lobby" && allPlayersInLobby));
+  const classroomHudStatus = racePhase === "starting"
+    ? "STARTING"
+    : localPlayer?.racePhase === "lobby"
+      ? "WAITING"
+      : localPlayer?.racePhase?.toUpperCase();
+  const classroomPlayerName = displayName || localPlayer?.displayName || "Student";
 
   if (isActiveRace) {
+    if (isClassroomSession) {
+      return (
+        <StudentClassroomHud
+          roomCode={roomId}
+          currentStudents={roster.length}
+          maxStudents={roomSettings.maxPlayers}
+          playerName={classroomPlayerName}
+          position={localRank}
+          score={Math.max(0, Math.trunc(localPlayer?.score ?? 0))}
+          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? 500))}
+          onLeave={onExitRace}
+        />
+      );
+    }
     return (
       <section className="pointer-events-auto absolute left-1/2 top-5 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/12 bg-slate-950/58 px-3 py-2 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
         <span className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-100/80">{roomId}</span>
@@ -268,6 +427,22 @@ export function LobbyPanel() {
 
   if (inRoomLobbyFlow) {
     const countdownMs = Math.max(0, raceStartingAtMs - nowMs);
+
+    if (isClassroomSession) {
+      return (
+        <StudentClassroomHud
+          roomCode={roomId}
+          currentStudents={roster.length}
+          maxStudents={roomSettings.maxPlayers}
+          playerName={classroomPlayerName}
+          position={localRank}
+          score={Math.max(0, Math.trunc(localPlayer?.score ?? 0))}
+          targetScore={Math.max(1, Math.trunc(roomSettings.targetScore ?? 500))}
+          status={classroomHudStatus}
+          onLeave={onLeaveRoom}
+        />
+      );
+    }
 
     return (
       <>
@@ -297,40 +472,17 @@ export function LobbyPanel() {
                   placeholder="Classroom Race"
                 />
               </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Max Players</span>
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Target Points</span>
                 <select
                   className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none transition focus:border-cyan-100/35"
-                  value={normalizedRoomSettingsDraft.maxPlayers}
-                  onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, maxPlayers: Number(event.target.value) }))}
+                  value={normalizedRoomSettingsDraft.targetScore}
+                  onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, targetScore: Number(event.target.value) }))}
                 >
-                  {Array.from({ length: 5 - minimumMaxPlayers }, (_, index) => minimumMaxPlayers + index).map((value) => (
-                    <option key={`max-${value}`} value={value}>{value}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Race Duration</span>
-                <select
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none transition focus:border-cyan-100/35"
-                  value={normalizedRoomSettingsDraft.raceDurationSeconds}
-                  onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, raceDurationSeconds: Number(event.target.value) }))}
-                >
-                  {[60, 120, 180, 300].map((value) => (
-                    <option key={`duration-${value}`} value={value}>{formatDurationLabel(value)}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Question Time</span>
-                <select
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none transition focus:border-cyan-100/35"
-                  value={normalizedRoomSettingsDraft.questionTimeLimitSeconds}
-                  onChange={(event) => setRoomSettingsDraft((current) => ({ ...current, questionTimeLimitSeconds: Number(event.target.value) }))}
-                >
-                  {[5, 8, 10, 12, 15].map((value) => (
-                    <option key={`question-time-${value}`} value={value}>{value}s</option>
-                  ))}
+                  <option value={300}>300 quick race</option>
+                  <option value={500}>500 normal race</option>
+                  <option value={1000}>1000 long race</option>
+                  <option value={1500}>1500 challenge</option>
                 </select>
               </label>
               <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100">
@@ -389,6 +541,16 @@ export function LobbyPanel() {
         className="pointer-events-auto absolute left-5 top-5 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
       >
         Maps
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          window.location.href = `${window.location.pathname}?teacher=1`;
+        }}
+        className="pointer-events-auto absolute left-5 top-20 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
+      >
+        Teacher
       </button>
 
       <button
@@ -489,38 +651,146 @@ export function LobbyPanel() {
 
       <div className="pointer-events-auto absolute bottom-8 left-8 z-20 flex w-[min(78vw,15rem)] flex-col gap-3">
         {joinBoxOpen ? (
-          <form
-            className="rounded-2xl border border-white/12 bg-slate-950/38 p-3 shadow-[0_18px_50px_rgba(2,8,23,0.32)] backdrop-blur-xl"
-            onSubmit={onJoin}
-          >
-            <label className="block">
-              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100/80">
-                Lobby Name/Number
-              </span>
-              <input
-                className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-50 outline-none transition placeholder:text-slate-300/55 focus:border-cyan-100/35 focus:bg-slate-950/55 focus:ring-2 focus:ring-cyan-100/10"
-                value={roomInput}
-                onChange={(event) => setRoomInput(event.target.value)}
-                placeholder="Arena-1"
-              />
+          <div className="max-h-[60vh] overflow-y-auto rounded-2xl border border-white/12 bg-slate-950/72 p-3 shadow-[0_18px_50px_rgba(2,8,23,0.32)] backdrop-blur-xl">
+            <form onSubmit={onJoin}>
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100/80">
+                  Room code
+                </span>
+                <input
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-50 outline-none transition placeholder:text-slate-300/55 focus:border-cyan-100/35 focus:bg-slate-950/55 focus:ring-2 focus:ring-cyan-100/10"
+                  value={roomInput}
+                  onChange={(event) => setRoomInput(event.target.value)}
+                  placeholder="class-abc123"
+                />
+              </label>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJoinBoxOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={connecting}
+                  className="rounded-xl border border-teal-100/30 bg-teal-400/14 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-teal-50 transition hover:border-teal-100/55 hover:bg-teal-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Join
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">Active classrooms</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshActiveClassrooms();
+                  }}
+                  aria-label="Refresh classrooms"
+                  title="Refresh classrooms"
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+                    <path
+                      d="M17.65 6.35A7.95 7.95 0 0 0 12 4V1L7 6l5 5V7a5 5 0 1 1-4.9 6H5.02A7 7 0 1 0 17.65 6.35Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-2 grid gap-1.5">
+                {activeLobbyError ? (
+                  <p className="rounded-xl bg-amber-300/10 px-3 py-3 text-xs text-amber-100">{activeLobbyError}</p>
+                ) : activeLobbies.length === 0 ? (
+                  <p className="rounded-xl bg-white/5 px-3 py-3 text-xs text-slate-300">No active classrooms are available.</p>
+                ) : activeLobbies.map((room) => {
+                  const currentPlayers = room.currentPlayers;
+                  const runningJoinable = room.status === "RACING" && room.allowMidGameJoin;
+                  const joinable = (room.status === "WAITING" || runningJoinable) && room.isListed && !room.isLocked && !room.deletedAt && !room.closedAt && !room.endedAt && room.currentPlayers < room.maxPlayers;
+                  return (
+                    <button
+                      key={room.id || room.roomCode}
+                      type="button"
+                      onClick={() => void joinRoom(room.roomCode)}
+                      disabled={!joinable}
+                      className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-left transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <span className={`h-2 w-2 rounded-full ${!joinable ? "bg-slate-400" : runningJoinable ? "bg-sky-300" : "bg-emerald-300"}`} />
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-cyan-100/85">{room.roomCode}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">{room.status === "RACING" ? "Running" : "Waiting"}</span>
+                      <span className="text-[11px] text-slate-300">{currentPlayers}/{room.maxPlayers}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {soloSetupOpen ? (
+          <div className="rounded-2xl border border-white/12 bg-slate-950/72 p-3 shadow-[0_18px_50px_rgba(2,8,23,0.32)] backdrop-blur-xl">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/75">Solo setup</p>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Bots</span>
+              <select
+                className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
+                value={soloBotCount}
+                onChange={(event) => setSoloBotCount(Number(event.target.value))}
+              >
+                {[1, 2, 3].map((value) => (
+                  <option key={value} value={value}>{value} bot{value === 1 ? "" : "s"}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Difficulty</span>
+              <select
+                className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
+                value={soloDifficulty}
+                onChange={(event) => setSoloDifficulty(event.target.value as "EASY" | "MEDIUM" | "HARD")}
+              >
+                <option value="EASY">Easy</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HARD">Hard</option>
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-cyan-100/75">Target Points</span>
+              <select
+                className="w-full rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-50 outline-none"
+                value={soloTargetScore}
+                onChange={(event) => setSoloTargetScore(Number(event.target.value))}
+              >
+                <option value={300}>300 short race</option>
+                <option value={500}>500 normal race</option>
+                <option value={1000}>1000 long race</option>
+                <option value={3000}>3000 marathon race</option>
+              </select>
             </label>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setJoinBoxOpen(false)}
+                onClick={() => setSoloSetupOpen(false)}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
               >
                 Cancel
               </button>
               <button
-                type="submit"
+                type="button"
+                onClick={startSoloRace}
                 disabled={connecting}
-                className="rounded-xl border border-teal-100/30 bg-teal-400/14 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-teal-50 transition hover:border-teal-100/55 hover:bg-teal-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-xl border border-cyan-100/30 bg-cyan-300/14 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-300/22 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Join
+                Start Solo
               </button>
             </div>
-          </form>
+          </div>
         ) : null}
 
         <button
@@ -544,11 +814,26 @@ export function LobbyPanel() {
             {connectionErrorMessage}
           </p>
         ) : null}
+        {import.meta.env.DEV ? (
+          <details className="rounded-2xl border border-white/10 bg-slate-950/56 px-3 py-2 text-[10px] text-slate-300 backdrop-blur-xl">
+            <summary className="cursor-pointer font-bold uppercase tracking-[0.12em] text-cyan-100/75">Sync diagnostics</summary>
+            <div className="mt-2 grid gap-1">
+              <span>Student sync active: {studentSyncDebug ? "true" : "false"}</span>
+              <span>sync-room last 60s: {syncDebug?.requestCountsLast60s.syncRoom ?? 0}</span>
+              <span>Current interval: {studentSyncDebug?.intervalMs ?? 0}ms</span>
+              <span>Next sync: {studentSyncDebug?.nextSyncAtMs ? new Date(studentSyncDebug.nextSyncAtMs).toLocaleTimeString() : "none"}</span>
+              <span>Room: {roomId || "none"} / {roomRacePhase}</span>
+              <span>Participant: {playerId || "none"} / {localPlayer?.racePhase ?? "none"}</span>
+              <span>Last stop: {syncDebug?.recentStops.find((entry) => entry.role === "student")?.stopReason ?? "none"}</span>
+            </div>
+          </details>
+        ) : null}
       </div>
 
       <p className="pointer-events-none absolute bottom-8 left-1/2 z-20 w-[min(86vw,32rem)] -translate-x-1/2 text-center text-xs leading-5 text-slate-100/80 sm:text-sm">
-        Join a room to enter the pre-race lobby, stage the cars, and start when the room is ready.
+        Join a room to enter the pre-race lobby and wait for the teacher to start.
       </p>
     </>
   );
 }
+

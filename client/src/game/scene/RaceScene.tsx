@@ -17,7 +17,8 @@ import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRend
 import { GARAGE_CARS, getGarageCarById, type GarageCar } from "../utils/carCatalog";
 
 const TRACK_Z_SCALE = 0.24;
-const LANE_WIDTH = 2.8;
+const LANE_WIDTH = 1.22;
+const MAX_LANE_INDEX = 7;
 const RACE_START_TRANSITION_MS = 2600;
 const RACE_CAR_GROUND_Y = 0;
 const RACE_CAR_VISUAL_ROTATION_Y = 0;
@@ -180,9 +181,9 @@ const ENVIRONMENTS: Record<TrackTheme, EnvironmentConfig> = {
 
 function laneToX(laneIndex: number) {
   const normalizedLane = Number.isFinite(laneIndex)
-    ? Math.max(0, Math.min(3, Math.trunc(laneIndex)))
+    ? Math.max(0, Math.min(MAX_LANE_INDEX, Math.trunc(laneIndex)))
     : 0;
-  return (normalizedLane - 1.5) * LANE_WIDTH;
+  return (normalizedLane - (MAX_LANE_INDEX / 2)) * LANE_WIDTH;
 }
 
 function hashColor(playerId: string) {
@@ -198,15 +199,12 @@ function hashColor(playerId: string) {
 
 function getLobbySlotPosition(slotIndex: number, totalPlayers: number): [number, number, number] {
   const safeTotal = Math.max(1, totalPlayers);
-  const positionsByCount: Record<number, Array<[number, number, number]>> = {
-    1: [[0, RACE_CAR_GROUND_Y, 14.5]],
-    2: [[-3.6, RACE_CAR_GROUND_Y, 14.6], [3.6, RACE_CAR_GROUND_Y, 14.6]],
-    3: [[-4.2, RACE_CAR_GROUND_Y, 15.0], [0, RACE_CAR_GROUND_Y, 13.2], [4.2, RACE_CAR_GROUND_Y, 15.0]],
-    4: [[-4.4, RACE_CAR_GROUND_Y, 15.1], [-1.4, RACE_CAR_GROUND_Y, 13.7], [1.4, RACE_CAR_GROUND_Y, 13.7], [4.4, RACE_CAR_GROUND_Y, 15.1]]
-  };
-
-  const positions = positionsByCount[Math.min(4, safeTotal)] ?? positionsByCount[4];
-  return positions[Math.min(slotIndex, positions.length - 1)] ?? [0, RACE_CAR_GROUND_Y, 14.5];
+  const columns = Math.min(4, safeTotal);
+  const row = Math.floor(slotIndex / columns);
+  const column = slotIndex % columns;
+  const x = (column - ((columns - 1) / 2)) * 2.8;
+  const z = 14.9 - row * 2.2 + (column % 2) * 0.35;
+  return [x, RACE_CAR_GROUND_Y, z];
 }
 
 function getStartTransitionProgress(racePhase: string, raceStartingAtMs: number, nowMs: number) {
@@ -953,8 +951,11 @@ function CarEntity({ playerId, slotIndex, totalPlayers }: { playerId: string; sl
 function CarsLayer() {
   const playerIds = useGameStore((state) => state.playerIds);
   const localPlayerId = useGameStore((state) => state.playerId);
+  const sessionMode = useGameStore((state) => state.sessionMode);
+  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
   const [deferredCarsReady, setDeferredCarsReady] = useState(false);
   const playerIdSignature = playerIds.join("|");
+  const classroomStudentMode = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   useEffect(() => {
     setDeferredCarsReady(false);
@@ -962,7 +963,9 @@ function CarsLayer() {
     return () => window.clearTimeout(preloadTimer);
   }, [localPlayerId, playerIdSignature]);
 
-  const visiblePlayerIds = deferredCarsReady
+  const visiblePlayerIds = classroomStudentMode
+    ? playerIds.filter((playerId) => playerId === localPlayerId)
+    : deferredCarsReady
     ? playerIds
     : playerIds.filter((playerId) => playerId === localPlayerId);
 

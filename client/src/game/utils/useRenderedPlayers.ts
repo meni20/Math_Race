@@ -32,6 +32,8 @@ function buildRenderedSnapshot(
     localPlayerId: gameState.playerId,
     playerSyncMeta: gameState.playerSyncMeta,
     localMotionPrediction: gameState.localMotionPrediction,
+    classroomVisualMode: gameState.sessionMode === "shared" && gameState.roomCreatorPlayerId === "",
+    answerFeedback: gameState.answerFeedback,
     trackLengthMeters: gameState.trackLengthMeters,
     raceStopped: gameState.raceStopped,
     nowMs,

@@ -1,6 +1,8 @@
 import type { DecisionChoiceRequest, PlayerSnapshot, QuestionMessage } from "../types/messages";
 
 const DEFAULT_BASE_SPEED_MPS = 42;
+const CLASSROOM_BASE_SPEED_KMH = 60;
+const CLASSROOM_MODIFIER_DURATION_MS = 5000;
 const MIN_SPEED_MPS = 18;
 const BOOST_EXTRA_SPEED_MPS = 30;
 const WRONG_ANSWER_SPEED_PENALTY_MPS = 7.5;
@@ -26,6 +28,13 @@ export interface LocalMotionPrediction {
   token: string;
   targetSpeedMps: number;
   teleportMeters: number;
+}
+
+export interface ClassroomAnswerFeedbackMotion {
+  accepted?: boolean;
+  resultType?: "CORRECT" | "WRONG" | "TIMEOUT";
+  pointsDelta?: number;
+  receivedAtMs: number;
 }
 
 interface EvaluatedPrompt {
@@ -222,10 +231,65 @@ interface AdvanceRenderedPlayersArgs {
   localPlayerId: string;
   playerSyncMeta: Record<string, PlayerSyncMeta>;
   localMotionPrediction: LocalMotionPrediction | null;
+  classroomVisualMode?: boolean;
+  answerFeedback?: ClassroomAnswerFeedbackMotion | null;
   trackLengthMeters: number;
   raceStopped: boolean;
   nowMs: number;
   lastFrameAtMs: number;
+}
+
+function kmhToMps(value: number) {
+  return value / 3.6;
+}
+
+function getClassroomModifierKmh(feedback: ClassroomAnswerFeedbackMotion | null | undefined, nowMs: number) {
+  if (!feedback?.accepted || nowMs - feedback.receivedAtMs > CLASSROOM_MODIFIER_DURATION_MS) {
+    return 0;
+  }
+  if (typeof feedback.pointsDelta === "number" && Number.isFinite(feedback.pointsDelta)) {
+    return feedback.pointsDelta;
+  }
+  if (feedback.resultType === "CORRECT") {
+    return 20;
+  }
+  if (feedback.resultType === "WRONG") {
+    return -10;
+  }
+  if (feedback.resultType === "TIMEOUT") {
+    return -5;
+  }
+  return 0;
+}
+
+function advanceClassroomRenderedPlayer(
+  previousPlayer: PlayerSnapshot | undefined,
+  targetPlayer: PlayerSnapshot,
+  deltaSeconds: number,
+  isLocalPlayer: boolean,
+  answerFeedback: ClassroomAnswerFeedbackMotion | null | undefined,
+  nowMs: number
+) {
+  const authoritativeScorePosition = Math.max(
+    0,
+    Math.trunc(targetPlayer.score ?? targetPlayer.positionMeters ?? 0)
+  );
+  const previousPosition = previousPlayer
+    ? Math.max(previousPlayer.positionMeters, authoritativeScorePosition)
+    : authoritativeScorePosition;
+  const modifierKmh = isLocalPlayer ? getClassroomModifierKmh(answerFeedback, nowMs) : 0;
+  const visualSpeedMps = Math.max(0, kmhToMps(CLASSROOM_BASE_SPEED_KMH + modifierKmh));
+  const advancedPosition = previousPosition + (visualSpeedMps * Math.max(0, deltaSeconds));
+  const finishedPosition = targetPlayer.finished
+    ? Math.max(advancedPosition, targetPlayer.positionMeters)
+    : advancedPosition;
+
+  return {
+    ...targetPlayer,
+    lap: targetPlayer.finished ? targetPlayer.lap : 0,
+    positionMeters: Math.max(previousPosition, finishedPosition),
+    speedMps: targetPlayer.finished ? 0 : visualSpeedMps
+  };
 }
 
 function shouldSnapRenderedPlayer(
@@ -298,6 +362,8 @@ export function advanceRenderedPlayers({
   localPlayerId,
   playerSyncMeta,
   localMotionPrediction,
+  classroomVisualMode = false,
+  answerFeedback,
   trackLengthMeters,
   raceStopped,
   nowMs,
@@ -325,6 +391,18 @@ export function advanceRenderedPlayers({
     );
 
     if (!targetPlayer) {
+      continue;
+    }
+
+    if (classroomVisualMode) {
+      nextPlayers[currentPlayerId] = advanceClassroomRenderedPlayer(
+        previousPlayers[currentPlayerId],
+        targetPlayer,
+        deltaSeconds,
+        currentPlayerId === localPlayerId,
+        answerFeedback,
+        nowMs
+      );
       continue;
     }
 

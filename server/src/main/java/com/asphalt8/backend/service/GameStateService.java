@@ -56,9 +56,9 @@ public class GameStateService {
     private static final long STALE_SESSION_MS = 20_000L;
     private static final long MAX_ADVANCE_STEP_MS = 250L;
     private static final long RACE_START_COUNTDOWN_MS = 2600L;
-    private static final int DEFAULT_MAX_PLAYERS = 4;
+    private static final int DEFAULT_MAX_PLAYERS = 8;
     private static final int MIN_MAX_PLAYERS = 2;
-    private static final int MAX_MAX_PLAYERS = 4;
+    private static final int MAX_MAX_PLAYERS = 8;
     private static final int DEFAULT_RACE_DURATION_SECONDS = 180;
     private static final int MIN_RACE_DURATION_SECONDS = 60;
     private static final int MAX_RACE_DURATION_SECONDS = 600;
@@ -144,7 +144,7 @@ public class GameStateService {
             }
 
             if (player == null) {
-                player = createPlayerState(playerId, displayName, carId, room.getPlayers().size() % 4);
+                player = createPlayerState(playerId, displayName, carId, room.getPlayers().size() % MAX_MAX_PLAYERS);
                 room.getPlayers().put(playerId, player);
             } else {
                 player.setDisplayName(displayName);
@@ -1125,7 +1125,7 @@ public class GameStateService {
             .sorted(rankingComparator())
             .map(player -> {
                 int safeLap = Math.max(0, Math.min(totalLaps, player.getLap()));
-                int safeLaneIndex = Math.max(0, Math.min(3, player.getLaneIndex()));
+                int safeLaneIndex = Math.max(0, Math.min(MAX_MAX_PLAYERS - 1, player.getLaneIndex()));
                 double safePosition = sanitizeFinite(player.getPositionMeters(), 0D);
                 safePosition = Math.max(0D, Math.min(trackLength, safePosition));
                 if (player.isFinished()) {
@@ -1234,7 +1234,7 @@ public class GameStateService {
             .sorted(Comparator.comparing(PlayerState::getPlayerId))
             .toList();
         for (int index = 0; index < ordered.size(); index += 1) {
-            ordered.get(index).setLaneIndex(index % 4);
+            ordered.get(index).setLaneIndex(index % MAX_MAX_PLAYERS);
         }
     }
 

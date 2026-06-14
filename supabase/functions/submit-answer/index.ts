@@ -14,22 +14,38 @@ Deno.serve(async (request) => {
   }
 
   try {
+    const startedAtMs = performance.now();
     const payload = await readJsonRequest<AnswerSubmissionRequest>(request);
+    const parsedAtMs = performance.now();
     const normalizedPayload: AnswerSubmissionRequest = {
       roomId: normalizeRoomId(payload.roomId, false),
       playerId: normalizePlayerId(payload.playerId, false),
       sessionId: String(payload.sessionId ?? ""),
       questionId: String(payload.questionId ?? ""),
-      answer: String(payload.answer ?? "")
+      answer: String(payload.answer ?? ""),
+      timeout: Boolean(payload.timeout)
     };
     const now = Date.now();
     const admin = createAdminClient();
+    const clientReadyAtMs = performance.now();
     const result = await runRoomMutation(
       admin,
       normalizedPayload.roomId,
       now,
       (room, presenceByPlayerId) => submitAnswer(room, normalizedPayload, presenceByPlayerId, now)
     );
+    const finishedAtMs = performance.now();
+    const totalMs = Math.round(finishedAtMs - startedAtMs);
+    if (totalMs > 1000 || Deno.env.get("SUBMIT_ANSWER_TIMING") === "1") {
+      console.info("[submit-answer]", {
+        roomId: normalizedPayload.roomId,
+        playerId: normalizedPayload.playerId,
+        parseMs: Math.round(parsedAtMs - startedAtMs),
+        setupMs: Math.round(clientReadyAtMs - parsedAtMs),
+        mutationMs: Math.round(finishedAtMs - clientReadyAtMs),
+        totalMs
+      });
+    }
     return jsonResponse(result.response);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
