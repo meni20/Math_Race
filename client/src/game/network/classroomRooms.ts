@@ -224,13 +224,30 @@ function formatFunctionError(functionName: string, error: { code?: string; messa
   return detail.join(" | ");
 }
 
+function formatInvokeTransportError(functionName: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const config = getSupabaseTransportConfig();
+  let host = "the configured Supabase project";
+  if (config) {
+    try {
+      host = new URL(config.url).host;
+    } catch {
+      host = config.url;
+    }
+  }
+  if (message.includes("Failed to send a request to the Edge Function")) {
+    return `Cannot reach Supabase Edge Function "${functionName}" at ${host}. Check that VITE_SUPABASE_URL points to an active Supabase project and that the function is deployed.`;
+  }
+  return message || `Supabase function not deployed: ${functionName}`;
+}
+
 async function invokeFunction<T>(functionName: string, payload: object = {}) {
   const { data, error } = await getClient().functions.invoke(functionName, {
     body: payload as Record<string, unknown>
   });
   if (error) {
     logClassroomError(functionName, payload, error);
-    throw new Error(error.message || `Supabase function not deployed: ${functionName}`);
+    throw new Error(formatInvokeTransportError(functionName, error));
   }
   const response = (data ?? {}) as T & { error?: { code?: string; message?: string; operation?: string; missingFieldOrColumn?: string; validationIssue?: string; originalMessage?: string } | null };
   if (response.error) {
