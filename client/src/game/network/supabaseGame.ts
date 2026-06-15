@@ -73,7 +73,30 @@ interface GameRoomStateRecord {
   closedAtMs?: number;
   deletedAtMs?: number;
   roomSettings: RoomSettings;
-  players: Record<string, PlayerSnapshot>;
+  players: Record<string, PlayerStateRecord>;
+}
+
+interface RaceQuestionRecord {
+  id: string;
+  kind?: string;
+  routeMode?: string;
+  operation?: string;
+  prompt: string;
+  choices?: string[];
+  difficulty?: "EASY" | "MEDIUM" | "HARD";
+  timeLimitSeconds?: number;
+  createdAtMs?: number;
+  expiresAtMs: number;
+}
+
+interface PendingQuestionRecord {
+  question?: RaceQuestionRecord;
+  expiresAtMs?: number;
+  fromHighwayChallenge?: boolean;
+}
+
+interface PlayerStateRecord extends PlayerSnapshot {
+  pendingQuestion?: PendingQuestionRecord | null;
 }
 
 function lifecycleFromRecord(record: GameRoomStateRecord): RoomLifecycleStatus {
@@ -90,6 +113,10 @@ function lifecycleFromRecord(record: GameRoomStateRecord): RoomLifecycleStatus {
     return "RACING";
   }
   return "WAITING";
+}
+
+function difficultyToNumber(difficulty: RaceQuestionRecord["difficulty"]) {
+  return difficulty === "HARD" ? 3 : difficulty === "MEDIUM" ? 2 : 1;
 }
 
 function buildSessionId() {
@@ -430,6 +457,10 @@ export class SupabaseGameClient {
           if (stateUpdate) {
             this.markRealtimeHealthy("UPDATE");
             useGameStore.getState().applyStateUpdate(stateUpdate);
+            const question = this.stateRecordToQuestion(stateJson);
+            if (question) {
+              useGameStore.getState().applyQuestion(question, "realtime");
+            }
             if (this.shouldStopForLifecycle(stateUpdate.lifecycleStatus) || this.isLocalParticipantMissing(stateUpdate)) {
               this.stopSyncLoop(stateUpdate.lifecycleStatus ?? "participant-missing");
               if (this.isLocalParticipantMissing(stateUpdate)) {
@@ -613,6 +644,39 @@ export class SupabaseGameClient {
         ? Math.max(1, record.trackLengthMeters ?? state.trackLengthMeters)
         : Math.max(1, Math.trunc((record.roomSettings ?? state.roomSettings).targetScore ?? DEFAULT_TARGET_SCORE)),
       players
+    };
+  }
+
+  private stateRecordToQuestion(record: GameRoomStateRecord | null | undefined): QuestionMessage | null {
+    const playerId = this.currentConnectPayload?.playerId;
+    if (!record || !playerId || record.racePhase !== "active" || record.raceStopped) {
+      return null;
+    }
+    const player = record.players?.[playerId];
+    const pending = player?.pendingQuestion;
+    const question = pending?.question;
+    const expiresAtMs = Number(question?.expiresAtMs ?? pending?.expiresAtMs ?? 0);
+    if (!player || player.racePhase !== "active" || !question || !question.id || !question.prompt || !Number.isFinite(expiresAtMs) || Date.now() > expiresAtMs) {
+      return null;
+    }
+    const timeLimitSeconds = Math.max(1, Math.trunc(Number(question.timeLimitSeconds ?? 15)));
+    return {
+      roomId: record.roomId,
+      targetPlayerId: playerId,
+      questionId: question.id,
+      id: question.id,
+      kind: question.kind,
+      routeMode: question.routeMode,
+      operation: question.operation,
+      prompt: question.prompt,
+      choices: Array.isArray(question.choices) ? question.choices.map(String) : undefined,
+      difficulty: difficultyToNumber(question.difficulty),
+      difficultyLabel: question.difficulty,
+      timeLimitMs: timeLimitSeconds * 1000,
+      timeLimitSeconds,
+      createdAtMs: Number.isFinite(question.createdAtMs) ? question.createdAtMs : expiresAtMs - (timeLimitSeconds * 1000),
+      expiresAtMs,
+      highwayChallenge: question.routeMode === "HIGHWAY" || Boolean(pending.fromHighwayChallenge)
     };
   }
 

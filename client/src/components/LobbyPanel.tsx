@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "../auth";
 import type { TrackTheme } from "../game/types/messages";
 import { gameSocket } from "../game/network/gameSocket";
 import { StudentClassroomHud } from "./StudentClassroomHud";
@@ -14,6 +15,7 @@ import {
   MAX_ROOM_PLAYERS,
   normalizeRoomSettings
 } from "../game/utils/roomSettings";
+import { useLanguage } from "../i18n";
 
 function buildPlayerId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -39,6 +41,16 @@ function hasRoomInUrl() {
     return false;
   }
   return Boolean(new URLSearchParams(window.location.search).get("room")?.trim());
+}
+
+function navigateToLogin() {
+  window.history.pushState(null, "", "/login");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function navigateToTeacherDashboard() {
+  window.history.pushState(null, "", "/teacher");
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function formatCountdown(ms: number) {
@@ -110,6 +122,8 @@ const TRACK_THEME_OPTIONS: Array<{ id: TrackTheme; value: TrackTheme; name: stri
 ];
 
 export function LobbyPanel() {
+  const { user, canAccessTeacher } = useAuth();
+  const { t } = useLanguage();
   const connection = useGameStore((state) => state.connection);
   const connectionErrorMessage = useGameStore((state) => state.connectionErrorMessage);
   const sessionMode = useGameStore((state) => state.sessionMode);
@@ -130,7 +144,7 @@ export function LobbyPanel() {
   const prepareJoin = useGameStore((state) => state.prepareJoin);
 
   const [roomInput, setRoomInput] = useState(roomId || getInitialRoomInput());
-  const [nameInput, setNameInput] = useState(displayName || "נהג מתמטי");
+  const [nameInput, setNameInput] = useState(displayName || user?.username || "נהג מתמטי");
   const [roomSettingsDraft, setRoomSettingsDraft] = useState(roomSettings);
   const [nowMs, setNowMs] = useState(Date.now());
   const [joinBoxOpen, setJoinBoxOpen] = useState(hasRoomInUrl());
@@ -166,8 +180,8 @@ export function LobbyPanel() {
   }, [roomId]);
 
   useEffect(() => {
-    setNameInput(displayName || "נהג מתמטי");
-  }, [displayName]);
+    setNameInput(displayName || user?.username || "נהג מתמטי");
+  }, [displayName, user?.username]);
 
   useEffect(() => {
     setRoomSettingsDraft(roomSettings);
@@ -351,6 +365,10 @@ export function LobbyPanel() {
   };
 
   const joinRoom = async (roomCode: string) => {
+    if (!user) {
+      navigateToLogin();
+      return;
+    }
     if (connecting || !nameInput.trim()) {
       return;
     }
@@ -435,11 +453,19 @@ export function LobbyPanel() {
   };
 
   const onPlaySolo = () => {
+    if (!user) {
+      navigateToLogin();
+      return;
+    }
     setSoloSetupOpen(true);
     setJoinBoxOpen(false);
   };
 
   const startSoloRace = () => {
+    if (!user) {
+      navigateToLogin();
+      return;
+    }
     if (connecting || !nameInput.trim()) {
       return;
     }
@@ -648,15 +674,15 @@ export function LobbyPanel() {
         מפות
       </button>
 
-      <button
-        type="button"
-        onClick={() => {
-          window.location.href = `${window.location.pathname}?teacher=1`;
-        }}
-        className="pointer-events-auto absolute left-5 top-20 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
-      >
-        מורה
-      </button>
+      {canAccessTeacher ? (
+        <button
+          type="button"
+          onClick={navigateToTeacherDashboard}
+          className="pointer-events-auto absolute left-5 top-20 z-20 rounded-full border border-white/12 bg-slate-950/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl transition hover:border-cyan-100/40 hover:bg-cyan-300/10"
+        >
+          {t("teacher")}
+        </button>
+      ) : null}
 
       <button
         type="button"
@@ -737,16 +763,24 @@ export function LobbyPanel() {
 
       <div className="pointer-events-auto absolute right-5 top-5 z-20 flex items-center gap-3 rounded-full border border-white/12 bg-slate-950/30 py-2 pl-3 pr-4 shadow-[0_18px_46px_rgba(2,8,23,0.28)] backdrop-blur-xl">
         <div className="flex h-12 w-12 items-center justify-center rounded-full border border-cyan-100/35 bg-cyan-300/15 text-base font-black uppercase text-cyan-50 shadow-[0_0_24px_rgba(103,232,249,0.22)]">
-          {(nameInput.trim() || "N").slice(0, 1)}
+          {(user?.username || nameInput.trim() || "N").slice(0, 1)}
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">שם שחקן</p>
-          <input
-            className="mt-0.5 w-32 bg-transparent text-sm font-semibold text-slate-50 outline-none placeholder:text-slate-300/55"
-            value={nameInput}
-            onChange={(event) => setNameInput(event.target.value)}
-            placeholder="נהג מתמטי"
-          />
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/70">{user ? t("signedInAs") : t("notSignedIn")}</p>
+          {user ? (
+            <>
+              <p className="mt-0.5 w-32 truncate text-sm font-semibold text-slate-50">{user.username}</p>
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-100/80">{t(user.role)}</p>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={navigateToLogin}
+              className="mt-0.5 text-sm font-bold text-cyan-50 underline decoration-cyan-100/35 underline-offset-4"
+            >
+              {t("login")}
+            </button>
+          )}
         </div>
         <span className={`hidden items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold uppercase sm:inline-flex ${badgeClass}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${badgeDotClass} animate-pulse`} />

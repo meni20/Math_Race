@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { gameSocket } from "../game/network/gameSocket";
 import { useGameStore } from "../game/store/useGameStore";
+import { useLanguage } from "../i18n";
 
 export function QuestionOverlay() {
+  const { t } = useLanguage();
   const racePhase = useGameStore((state) => state.racePhase);
   const question = useGameStore((state) => state.question);
   const questionReceivedAtMs = useGameStore((state) => state.questionReceivedAtMs);
@@ -70,22 +72,23 @@ export function QuestionOverlay() {
       ? "border-amber-300/55 bg-amber-500/18 text-amber-100"
       : "border-rose-300/55 bg-rose-500/18 text-rose-100";
   const feedbackText = latestFeedback?.feedback === "correct"
-    ? "נכון!"
+    ? t("correct")
     : latestFeedback?.feedback === "timeout"
-      ? "נגמר הזמן"
-      : "לא נכון";
+      ? t("timeout")
+      : t("wrong");
   const promptText = question.kind === "WORD_PROBLEM" ? question.prompt : `${question.prompt} = ?`;
+  const arithmeticQuestion = question.kind !== "WORD_PROBLEM";
 
   return (
     <section className="pointer-events-auto absolute bottom-4 left-1/2 z-[25] w-[min(94vw,30rem)] -translate-x-1/2 rounded-2xl border border-cyan-300/40 bg-slate-900/88 p-3 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/85">
-          {question.highwayChallenge ? "אתגר כביש מהיר" : "בוסט מתמטי"}
+          {question.highwayChallenge ? t("highwayChallenge") : t("mathBoost")}
         </p>
         <p className="text-xs font-semibold text-cyan-100">{(remainingMs / 1000).toFixed(1)}s</p>
       </div>
 
-      <p className="mb-3 text-xl font-bold text-cyan-50">{promptText}</p>
+      <p className={`mb-3 text-xl font-bold text-cyan-50 ${arithmeticQuestion ? "math-expression" : ""}`}>{promptText}</p>
 
       {latestFeedback ? (
         <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-semibold ${feedbackClass}`}>
@@ -114,7 +117,7 @@ export function QuestionOverlay() {
               <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-200/50 bg-cyan-300/12 text-xs uppercase text-cyan-100">
                 {String.fromCharCode(65 + index)}
               </span>
-              {choice}
+              <span className="math-answer">{choice}</span>
             </button>
           );
         })}

@@ -9,10 +9,12 @@ import type { TeacherDashboardView, TeacherEvent, TeacherRaceConfig, TeacherRoom
 import { DEFAULT_TEACHER_CONFIG, buildRandomId, normalizeTeacherConfig } from "./teacherUtils";
 import { archiveStaleClassroomRooms, getClassroomAdapterInfo } from "../../game/network/classroomRooms";
 import { getActiveSyncDebugState } from "../../game/sync/syncLifecycle";
+import { useLanguage } from "../../i18n";
 
 type TeacherConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
 export function TeacherDashboard() {
+  const { t } = useLanguage();
   const clientRef = useRef<TeacherGameClient | null>(null);
   const previousRanksRef = useRef<Record<string, number>>({});
   const previousPlayersRef = useRef<Record<string, {
@@ -311,17 +313,18 @@ export function TeacherDashboard() {
   };
 
   const deleteRoom = (roomCode: string) => {
-    if (!window.confirm(`למחוק את החדר ${roomCode}? הוא יוסתר מתלמידים ויועבר לארכיון.`)) {
+    if (!window.confirm(t("deleteRoomConfirm"))) {
       return;
     }
     void clientRef.current?.deleteRoom(roomCode).then(() => {
+      setRooms((current) => current.filter((room) => room.roomCode !== roomCode));
       if (snapshot?.roomId === roomCode) {
         setSnapshot(null);
         setView("create");
       }
       refreshRooms();
     }).catch((error) => {
-        const message = error instanceof Error ? error.message : "לא ניתן למחוק חדר.";
+        const message = error instanceof Error ? error.message : t("deleteRoomFailed");
       setLastClassroomError(message);
       setConnectionMessage(message);
     });
