@@ -4,10 +4,10 @@ import { TeacherCarIcon } from "./TeacherCarIcon";
 export function TeacherLeaderboard({ players }: { players: TeacherPlayerView[] }) {
   return (
     <section className="rounded-lg border border-white/10 bg-white/6 p-4">
-      <h2 className="text-lg font-black text-white">Leaderboard</h2>
+      <h2 className="text-lg font-black text-white">לוח מובילים</h2>
       <div className="mt-3 grid gap-2">
         {players.length === 0 ? (
-          <p className="rounded-lg bg-slate-950/28 px-3 py-3 text-sm text-slate-300">No students yet.</p>
+          <p className="rounded-lg bg-slate-950/28 px-3 py-3 text-sm text-slate-300">עדיין אין תלמידים.</p>
         ) : players.map((player) => (
           <div key={player.playerId} className="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-lg bg-slate-950/30 px-3 py-2">
             <span className="text-sm font-black text-white">#{player.rank}</span>

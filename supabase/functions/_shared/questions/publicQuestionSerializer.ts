@@ -8,6 +8,7 @@ export function serializePublicQuestion(question: RaceQuestionPrivate): RaceQues
     difficulty: question.difficulty,
     operation: question.operation,
     prompt: question.prompt,
+    choices: question.choices,
     timeLimitSeconds: question.timeLimitSeconds,
     createdAtMs: question.createdAtMs,
     expiresAtMs: question.expiresAtMs

@@ -34,3 +34,14 @@ h5,
 h6 {
   font-family: "Inter", "Roboto", Arial, sans-serif;
 }
+
+.math-expression {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: center;
+}
+
+.math-answer {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

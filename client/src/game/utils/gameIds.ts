@@ -16,6 +16,6 @@ export function normalizePlayerId(playerId: string) {
   return normalizeId(playerId);
 }
 
-export function isSoloRoomId(roomId: string) {
-  return roomId.startsWith("solo-");
+export function isSoloRoomId(roomId: string | null | undefined) {
+  return typeof roomId === "string" && roomId.trim().toLowerCase().startsWith("solo-");
 }

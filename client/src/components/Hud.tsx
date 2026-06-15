@@ -93,18 +93,19 @@ export function Hud() {
   const localSpeedKmh = localPlayer ? toKmh(localPlayer.speedMps) : 0;
   const localScore = Math.max(0, Math.trunc(localPlayer?.score ?? 0));
   const targetScore = Math.max(1, Math.trunc(roomSettings.targetScore ?? trackLengthMeters));
-
-  const displayedLap = localPlayer
-    ? Math.min(totalLaps, localPlayer.finished ? totalLaps : localPlayer.lap + 1)
-    : 1;
-  const distanceToFinishGateMeters = getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
-  const lapsRemainingToFinish = localPlayer
-    ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
-    : Math.max(0, totalLaps - 1);
-  const finalLapActive = isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
-  const raceElapsedMs = raceStartedAtMs
+  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
+  const raceElapsedMs = !isClassroomSession && raceStartedAtMs
     ? Math.max(0, (raceFinishedAtMs ?? nowMs) - raceStartedAtMs)
     : 0;
+  const distanceToFinishGateMeters = !isClassroomSession
+    ? getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps)
+    : 0;
+  const lapsRemainingToFinish = !isClassroomSession
+    ? localPlayer
+      ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
+      : Math.max(0, totalLaps - 1)
+    : 0;
+  const finalLapActive = !isClassroomSession && isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
   const standings = useMemo(() => {
     return playerIds
       .map((currentPlayerId) => players[currentPlayerId])
@@ -128,7 +129,6 @@ export function Hud() {
   if (connection !== "connected" || !roomId || racePhase !== "active") {
     return null;
   }
-  const isClassroomSession = sessionMode === "shared" && roomCreatorPlayerId === "";
 
   return (
     <>
@@ -136,7 +136,7 @@ export function Hud() {
         <>
           <section className="pointer-events-none absolute left-5 top-5 z-20 w-[min(82vw,17rem)] rounded-2xl border border-white/12 bg-slate-950/58 p-3 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
             <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/80">Players: {playerIds.length}/{roomSettings.maxPlayers}</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/80">שחקנים: {playerIds.length}/{roomSettings.maxPlayers}</p>
               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-200">
                 {racePhase}
               </span>
@@ -152,10 +152,10 @@ export function Hud() {
                   }`}
                 >
                   <span className="min-w-0 truncate font-semibold">
-                    {index + 1}. {player.playerId === playerId ? "You" : player.displayName}
+                    {index + 1}. {player.playerId === playerId ? "אתה" : player.displayName}
                   </span>
                   <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-300">
-                    {Math.max(0, Math.trunc(player.score ?? 0))} pts
+                    {Math.max(0, Math.trunc(player.score ?? 0))} נק'
                   </span>
                 </li>
               ))}
@@ -174,12 +174,12 @@ export function Hud() {
               {(localPlayer?.displayName || "N").slice(0, 1)}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-xs font-bold uppercase tracking-[0.14em] text-slate-100">Room: {roomId}</p>
+              <p className="truncate text-xs font-bold uppercase tracking-[0.14em] text-slate-100">חדר: {roomId}</p>
               <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: localCar.accentColor }}>
-                Car: {localCar.name}
+                רכב: {localCar.name}
               </p>
               <p className="mt-0.5 truncate text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-100/85">
-                Score: {localScore} / {targetScore}
+                ניקוד: {localScore} / {targetScore}
               </p>
             </div>
           </section>
@@ -188,21 +188,23 @@ export function Hud() {
 
       <Speedometer speedKmh={localSpeedKmh} accentColor={localCar.accentColor} />
 
-      <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
-        <p className="font-semibold text-slate-50">Score {localScore}/{targetScore}</p>
-        {sessionMode === "solo" ? (
-          <p className="mt-1 text-amber-100/90">{localPlayer?.finished ? "Target reached" : `${Math.max(0, targetScore - localScore)} pts to finish`}</p>
-        ) : (
-          <p className="mt-1 text-amber-100/90">
-            {localPlayer?.finished
-              ? "Finish gate crossed"
-              : finalLapActive
-                ? `Finish: ${formatDistance(distanceToFinishGateMeters)}`
-                : `Opens in ${lapsRemainingToFinish} lap${lapsRemainingToFinish === 1 ? "" : "s"}`}
-          </p>
-        )}
-        <p className="mt-1 text-cyan-100/80">Race {formatClock(raceElapsedMs)}</p>
-      </section>
+      {!isClassroomSession ? (
+        <section className="pointer-events-none absolute bottom-5 right-5 z-20 rounded-2xl border border-white/12 bg-slate-950/58 px-4 py-3 text-right text-xs text-slate-200 shadow-[0_14px_34px_rgba(2,8,23,0.3)]">
+          <p className="font-semibold text-slate-50">ניקוד {localScore}/{targetScore}</p>
+          {sessionMode === "solo" ? (
+            <p className="mt-1 text-amber-100/90">{localPlayer?.finished ? "הגעת ליעד" : `עוד ${Math.max(0, targetScore - localScore)} נק' לסיום`}</p>
+          ) : (
+            <p className="mt-1 text-amber-100/90">
+              {localPlayer?.finished
+                ? "חצית את שער הסיום"
+                : finalLapActive
+                  ? `סיום: ${formatDistance(distanceToFinishGateMeters)}`
+                  : `נפתח בעוד ${lapsRemainingToFinish} הקפות`}
+            </p>
+          )}
+          <p className="mt-1 text-cyan-100/80">זמן מרוץ {formatClock(raceElapsedMs)}</p>
+        </section>
+      ) : null}
 
       {feedback && nowMs - feedback.receivedAtMs < 1200 ? (
         <section
@@ -216,11 +218,11 @@ export function Hud() {
         >
           {feedback.accepted
             ? feedback.resultType === "TIMEOUT" || feedback.feedback === "timeout"
-              ? "Time's up"
+              ? "נגמר הזמן"
               : feedback.correct
-              ? "Correct answer: BOOST engaged"
-              : "Wrong answer: speed penalty"
-            : "Answer missed timing window, new question issued"}
+              ? "תשובה נכונה: הבוסט הופעל"
+              : "תשובה לא נכונה: האטה"
+            : "התשובה הגיעה מאוחר מדי, נשלחה שאלה חדשה"}
         </section>
       ) : null}
     </>

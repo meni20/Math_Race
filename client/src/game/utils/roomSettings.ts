@@ -6,9 +6,9 @@ const MIN_RACE_DURATION_SECONDS = 60;
 const MAX_RACE_DURATION_SECONDS = 600;
 const MIN_QUESTION_TIME_LIMIT_SECONDS = 5;
 const MAX_QUESTION_TIME_LIMIT_SECONDS = 20;
-const DEFAULT_TARGET_SCORE = 500;
-const MIN_TARGET_SCORE = 100;
-const MAX_TARGET_SCORE = 5000;
+export const DEFAULT_TARGET_SCORE = 300;
+export const MIN_TARGET_SCORE = 50;
+export const MAX_TARGET_SCORE = 10000;
 
 function clampInteger(value: number, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) {
@@ -20,9 +20,9 @@ function clampInteger(value: number, fallback: number, min: number, max: number)
 function buildDefaultRaceName(roomId: string) {
   const trimmedRoomId = roomId.trim();
   if (!trimmedRoomId) {
-    return "Classroom Race";
+    return "מרוץ כיתתי";
   }
-  return `${trimmedRoomId.replace(/[-_]+/g, " ")} setup`;
+  return `הגדרת ${trimmedRoomId.replace(/[-_]+/g, " ")}`;
 }
 
 export function buildDefaultRoomSettings(roomId: string): RoomSettings {
@@ -96,7 +96,7 @@ export function formatDurationLabel(seconds: number) {
   const minutes = Math.floor(safeSeconds / 60);
   const remainderSeconds = safeSeconds % 60;
   if (remainderSeconds === 0) {
-    return `${minutes} min`;
+    return `${minutes} דק'`;
   }
-  return `${minutes}m ${remainderSeconds}s`;
+  return `${minutes}ד ${remainderSeconds}ש`;
 }

@@ -11,7 +11,7 @@ import {
 import { getSupabaseTransportConfig } from "./transportConfig";
 import type { GameStateUpdateMessage, RoomSettings } from "../types/messages";
 import { normalizeRoomSettings } from "../utils/roomSettings";
-import { recordNetworkRequest } from "../sync/syncLifecycle";
+import { recordActiveClassroomListRequest, recordNetworkRequest } from "../sync/syncLifecycle";
 
 export type ClassroomRoomLifecycleStatus = "DRAFT" | "CREATED" | "WAITING" | "RACING" | "FINISHED" | "CLOSED" | "DELETED";
 export type ClassroomAdapterMode = "supabase" | "local-dev" | "unavailable";
@@ -568,7 +568,14 @@ export function getClassroomRoomService(): ClassroomRoomService {
   return new UnavailableClassroomRoomService();
 }
 
-export async function listActiveClassroomRooms() {
+export async function listActiveClassroomRooms(options: { panelOpen?: boolean; inClassroomRoom?: boolean; manual?: boolean } = {}) {
+  if (getClassroomAdapterInfo().mode === "supabase") {
+    recordActiveClassroomListRequest({
+      panelOpen: Boolean(options.panelOpen),
+      inClassroomRoom: Boolean(options.inClassroomRoom),
+      manual: options.manual
+    });
+  }
   return getClassroomRoomService().listActiveRooms();
 }
 

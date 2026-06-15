@@ -1061,6 +1061,7 @@ public class GameStateService {
             baseQuestion.questionId(),
             baseQuestion.prompt(),
             baseQuestion.correctAnswer(),
+            baseQuestion.choices(),
             baseQuestion.difficulty(),
             timeLimitMs,
             baseQuestion.boostMultiplier()
@@ -1182,6 +1183,7 @@ public class GameStateService {
             player.getPlayerId(),
             pendingQuestion.getQuestion().questionId(),
             pendingQuestion.getQuestion().prompt(),
+            pendingQuestion.getQuestion().choices(),
             pendingQuestion.getQuestion().difficulty(),
             pendingQuestion.getQuestion().timeLimitMs(),
             pendingQuestion.getExpiresAtMs(),

@@ -9,7 +9,7 @@ import {
 } from "../../game/network/localClassroom";
 import type { GameStateUpdateMessage, PlayerSnapshot, RacePhase, RoomSettings } from "../../game/types/messages";
 import { normalizeCarId } from "../../game/utils/carSelection";
-import { normalizeRoomSettings } from "../../game/utils/roomSettings";
+import { DEFAULT_TARGET_SCORE, normalizeRoomSettings } from "../../game/utils/roomSettings";
 import { connectTeacherRoomLiveUpdates, type TeacherRoomLiveSubscription } from "../../game/sync/teacherLiveSubscription";
 import { recordNetworkRequest, startSyncLifecycle, stopSyncLifecycle, updateSyncLifecycle } from "../../game/sync/syncLifecycle";
 import { buildTeacherPlayers, configToRoomSettings } from "./teacherUtils";
@@ -97,6 +97,7 @@ function snapshotFromStateUpdate(
   update: GameStateUpdateMessage,
   statuses: Record<string, TeacherPlayerStatus>
 ): TeacherRoomSnapshot {
+  const targetScore = Math.max(1, Math.trunc(update.roomSettings?.targetScore ?? DEFAULT_TARGET_SCORE));
   return {
     roomId: update.roomId,
     lifecycleStatus: update.lifecycleStatus ?? lifecycleFromRacePhase(update.racePhase, update.raceStopped),
@@ -107,9 +108,9 @@ function snapshotFromStateUpdate(
     raceStoppedAtMs: update.raceStoppedAtMs,
     winnerPlayerId: update.winnerPlayerId ?? "",
     roomSettings: update.roomSettings,
-    trackLengthMeters: update.trackLengthMeters ?? 3000,
+    trackLengthMeters: update.trackLengthMeters ?? targetScore,
     totalLaps: 1,
-    players: buildTeacherPlayers(update.players, update.trackLengthMeters ?? 3000, 1, statuses)
+    players: buildTeacherPlayers(update.players, targetScore, statuses)
   };
 }
 
@@ -156,7 +157,7 @@ function stateRecordToUpdate(record: GameRoomStateRecord): GameStateUpdateMessag
     winnerPlayerId: record.winnerPlayerId ?? "",
     roomCreatorPlayerId: "",
     roomSettings: record.roomSettings,
-    trackLengthMeters: record.trackLengthMeters ?? 3000,
+    trackLengthMeters: record.trackLengthMeters ?? record.roomSettings?.targetScore ?? DEFAULT_TARGET_SCORE,
     players
   };
 }
@@ -207,6 +208,7 @@ export class TeacherGameClient {
     return {
       transportState: this.liveTransportState,
       sseConnected: this.sseConnected,
+      sseHealthy: this.isSseHealthy(),
       teacherPollingActive: this.syncLifecycleId !== null,
       latestRoomStatus: this.latestSnapshot?.lifecycleStatus ?? null,
       syncFailureCount: this.syncFailureCount,
@@ -740,14 +742,18 @@ export class TeacherGameClient {
     return this.lastSseEventAtMs > 0 && Date.now() - this.lastSseEventAtMs <= SSE_RECENT_EVENT_MS;
   }
 
+  private isSseHealthy() {
+    return this.sseConnected && this.isSseRecentlyHealthy();
+  }
+
   private blockTeacherSyncRoomRequest(reason: string) {
-    const shouldBlock = this.liveTransportState === "sse_connected" || this.sseConnected || (this.liveSubscription !== null && this.liveTransportState !== "sse_error" && this.isSseRecentlyHealthy());
+    const shouldBlock = this.liveTransportState === "sse_connected" || this.isSseHealthy() || (this.liveSubscription !== null && this.liveTransportState !== "sse_error" && this.isSseRecentlyHealthy());
     if (!shouldBlock) {
       return false;
     }
     recordNetworkRequest("teacher-sync-room-blocked", "teacher");
     if (import.meta.env.DEV) {
-      console.info("Blocked teacher-sync-room because SSE is connected", {
+      console.warn("Blocked teacher-sync-room because SSE is healthy", {
         reason,
         transportState: this.liveTransportState,
         sseConnected: this.sseConnected,

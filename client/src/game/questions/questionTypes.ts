@@ -36,6 +36,7 @@ export type RaceQuestionPrivate = {
   prompt: string;
   correctAnswer: number;
   acceptedAnswers: string[];
+  choices: string[];
   timeLimitSeconds: number;
   pointsCorrect: number;
   pointsWrong: number;
@@ -51,6 +52,7 @@ export type RaceQuestionPublic = {
   difficulty: Difficulty;
   operation?: Operation;
   prompt: string;
+  choices: string[];
   timeLimitSeconds: number;
   createdAtMs: number;
   expiresAtMs: number;

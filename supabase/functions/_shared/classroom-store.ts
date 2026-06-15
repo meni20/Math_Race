@@ -32,6 +32,9 @@ export interface ClassroomRoomSummary {
 const CLASSROOM_ROOMS_TABLE = "classroom_rooms";
 const ROOM_PARTICIPANTS_TABLE = "room_participants";
 const ROOM_EVENTS_TABLE = "room_events";
+const DEFAULT_TARGET_SCORE = 300;
+const MIN_TARGET_SCORE = 50;
+const MAX_TARGET_SCORE = 10000;
 const OPTIONAL_CLASSROOM_ROOM_COLUMNS = new Set(["target_score"]);
 const OPTIONAL_ROOM_PARTICIPANT_COLUMNS = new Set([
   "timeout_answers",
@@ -46,12 +49,15 @@ function dateFromMs(value: number | null | undefined) {
 }
 
 function settingsValue(settings: RoomSettings | undefined | null, fallbackRoomCode: string) {
+  const targetScore = Number(settings?.targetScore ?? DEFAULT_TARGET_SCORE);
   return {
     raceName: settings?.raceName?.trim() || "Classroom Math Race",
     maxPlayers: 8,
     raceDurationSeconds: Math.max(1, Math.trunc(settings?.raceDurationSeconds ?? 180)),
     questionTimeLimitSeconds: Math.max(1, Math.trunc(settings?.questionTimeLimitSeconds ?? 15)),
-    targetScore: Math.max(100, Math.trunc(settings?.targetScore ?? 500)),
+    targetScore: Number.isFinite(targetScore)
+      ? Math.max(MIN_TARGET_SCORE, Math.min(MAX_TARGET_SCORE, Math.trunc(targetScore)))
+      : DEFAULT_TARGET_SCORE,
     roomCode: fallbackRoomCode
   };
 }
@@ -156,7 +162,7 @@ export function deriveClassroomStatus(room: GameRoomStateRecord): ClassroomRoomS
 }
 
 function progressPercent(room: GameRoomStateRecord, player: PlayerStateRecord) {
-  const targetScore = Math.max(1, Math.trunc(room.targetScore ?? room.roomSettings?.targetScore ?? 500));
+  const targetScore = Math.max(1, Math.trunc(room.targetScore ?? room.roomSettings?.targetScore ?? DEFAULT_TARGET_SCORE));
   if (room.teacherSessionId) {
     return Math.max(0, Math.min(100, (Math.max(0, player.score ?? 0) / targetScore) * 100));
   }
@@ -187,6 +193,7 @@ function sortedPlayersByProgress(room: GameRoomStateRecord) {
 }
 
 function mapRoomRow(row: Record<string, unknown>): ClassroomRoomSummary {
+  const targetScore = Number(row.target_score ?? DEFAULT_TARGET_SCORE);
   return {
     id: String(row.id ?? ""),
     teacherId: row.teacher_id ? String(row.teacher_id) : null,
@@ -198,7 +205,7 @@ function mapRoomRow(row: Record<string, unknown>): ClassroomRoomSummary {
     currentPlayers: Number(row.current_players ?? 0),
     raceDurationSeconds: Number(row.race_duration_sec ?? 180),
     questionTimeLimitSeconds: Number(row.question_time_limit_sec ?? 8),
-    targetScore: Number(row.target_score ?? 500),
+    targetScore: Number.isFinite(targetScore) ? Math.max(MIN_TARGET_SCORE, Math.min(MAX_TARGET_SCORE, Math.trunc(targetScore))) : DEFAULT_TARGET_SCORE,
     difficulty: row.difficulty ? String(row.difficulty) : null,
     mapId: row.map_id ? String(row.map_id) : null,
     requiresApproval: Boolean(row.requires_approval),
@@ -233,6 +240,7 @@ export async function upsertClassroomRoomFromState(admin: SupabaseClient, room: 
 
   const settings = settingsValue(room.roomSettings, room.roomId);
   const status = deriveClassroomStatus(room);
+  const terminal = status === "FINISHED" || status === "CLOSED" || status === "DELETED";
   const nowIso = new Date().toISOString();
   const row: Record<string, unknown> = {
     teacher_id: room.teacherSessionId,
@@ -249,12 +257,12 @@ export async function upsertClassroomRoomFromState(admin: SupabaseClient, room: 
     question_type: ["MIXED"],
     map_id: room.mapId ?? null,
     requires_approval: false,
-    is_locked: Boolean(room.isLocked),
-    is_listed: room.isListed !== false,
+    is_locked: terminal ? true : Boolean(room.isLocked),
+    is_listed: terminal ? false : room.isListed !== false,
     allow_mid_game_join: room.allowMidGameJoin !== false,
     updated_at: nowIso,
     started_at: status === "RACING" ? (dateFromMs(room.raceStartedAtMs || room.raceStartingAtMs) ?? nowIso) : dateFromMs(room.raceStartedAtMs),
-    ended_at: dateFromMs(room.endedAtMs),
+    ended_at: status === "FINISHED" ? (dateFromMs(room.endedAtMs) ?? nowIso) : dateFromMs(room.endedAtMs),
     closed_at: dateFromMs(room.closedAtMs),
     deleted_at: dateFromMs(room.deletedAtMs)
   };

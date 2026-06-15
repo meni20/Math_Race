@@ -20,6 +20,9 @@ type AdvanceResult = {
   events: string[];
 };
 
+const NORMAL_OPERATION_SEQUENCE = ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"] as const;
+const DIFFICULTY_ORDER: Difficulty[] = ["EASY", "MEDIUM", "HARD"];
+
 function randomId(prefix: string) {
   const randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
   return randomUUID ? randomUUID() : `${prefix}-${Math.random().toString(36).slice(2, 12)}`;
@@ -69,18 +72,37 @@ export function markQuestionAnswered(state: PlayerQuestionState, questionId: str
 export function createRouteChoicePrompt(nowMs: number, id = randomId("route")): RouteChoicePrompt {
   return {
     id,
-    prompt: "Choose route: HIGHWAY or DIRT ROAD.",
+    prompt: "בחרו מסלול: כביש מהיר או דרך עפר.",
     options: ["HIGHWAY", "DIRT_ROAD"],
     createdAtMs: nowMs,
     expiresAtMs: nowMs + (ROUTE_CHOICE_TIME_LIMIT_SECONDS * 1000)
   };
 }
 
+function capDifficulty(difficulty: Difficulty, configuredDifficulty?: Difficulty): Difficulty {
+  if (!configuredDifficulty) {
+    return difficulty;
+  }
+  const difficultyIndex = DIFFICULTY_ORDER.indexOf(difficulty);
+  const capIndex = DIFFICULTY_ORDER.indexOf(configuredDifficulty);
+  return DIFFICULTY_ORDER[Math.min(difficultyIndex, capIndex)] ?? difficulty;
+}
+
+function getNormalQuestionPlan(state: PlayerQuestionState, configuredDifficulty?: Difficulty) {
+  const step = Math.min(NORMAL_OPERATION_SEQUENCE.length - 1, Math.floor(state.streak / 2));
+  const operation = NORMAL_OPERATION_SEQUENCE[step];
+  const progressionDifficulty: Difficulty = step <= 1 ? "EASY" : step === 2 ? "MEDIUM" : "HARD";
+  return {
+    difficulty: capDifficulty(progressionDifficulty, configuredDifficulty),
+    operation
+  };
+}
+
 function generateNormalQuestion(state: PlayerQuestionState, nowMs: number, configuredDifficulty?: Difficulty) {
-  const difficulty = configuredDifficulty ?? (state.streak >= 4 ? "MEDIUM" : "EASY");
+  const plan = getNormalQuestionPlan(state, configuredDifficulty);
   return generateArithmeticQuestion({
-    difficulty,
-    operation: "MIXED",
+    difficulty: plan.difficulty,
+    operation: plan.operation,
     routeMode: "NORMAL",
     nowMs
   });

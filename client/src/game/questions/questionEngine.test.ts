@@ -4,6 +4,7 @@ import {
   advanceQuestionStateAfterAnswer,
   chooseRoute,
   createInitialPlayerQuestionState,
+  ensureNextPrompt,
   hasAnsweredQuestion
 } from "./questionStateMachine";
 import { scoreAnswer } from "./scoringEngine";
@@ -31,6 +32,9 @@ export function runQuestionEngineTests() {
     id: "add-easy"
   });
   assert(validateAnswer(addition, String(addition.correctAnswer), nowMs).correct, "Addition easy answer is correct.");
+  assert(addition.choices.length === 4, "Addition easy has four multiple-choice answers.");
+  assert(addition.choices.includes(String(addition.correctAnswer)), "Addition easy choices include the correct answer.");
+  assert(new Set(addition.choices).size === addition.choices.length, "Addition easy choices are unique.");
 
   for (let index = 0; index < 40; index += 1) {
     const subtraction = generateArithmeticQuestion({
@@ -89,6 +93,17 @@ export function runQuestionEngineTests() {
   assert(scoreAnswer(highway, "CORRECT").pointsDelta === 200, "Highway correct gives +200.");
   assert(scoreAnswer(highway, "WRONG").pointsDelta === -70, "Highway wrong gives -70.");
 
+  const progressionState = createInitialPlayerQuestionState();
+  const normalAdd = ensureNextPrompt({ ...progressionState, streak: 0 }, nowMs, "HARD").nextQuestion!;
+  const normalSubtract = ensureNextPrompt({ ...progressionState, streak: 2 }, nowMs, "HARD").nextQuestion!;
+  const normalMultiply = ensureNextPrompt({ ...progressionState, streak: 4 }, nowMs, "HARD").nextQuestion!;
+  const normalDivide = ensureNextPrompt({ ...progressionState, streak: 6 }, nowMs, "HARD").nextQuestion!;
+  assert(normalAdd.operation === "ADD" && normalAdd.difficulty === "EASY", "Normal questions start with easy addition.");
+  assert(normalSubtract.operation === "SUBTRACT" && normalSubtract.difficulty === "EASY", "Normal questions progress to easy subtraction.");
+  assert(normalMultiply.operation === "MULTIPLY" && normalMultiply.difficulty === "MEDIUM", "Normal questions progress to medium multiplication.");
+  assert(normalDivide.operation === "DIVIDE" && normalDivide.difficulty === "HARD", "Normal questions progress to hard division.");
+  assert(ensureNextPrompt({ ...progressionState, streak: 6 }, nowMs, "MEDIUM").nextQuestion?.difficulty === "MEDIUM", "Room difficulty caps normal progression.");
+
   let state = createInitialPlayerQuestionState();
   let routeChoiceOpened = false;
   for (let index = 0; index < 8; index += 1) {
@@ -117,6 +132,7 @@ export function runQuestionEngineTests() {
 
   const publicQuestion = serializePublicQuestion(highway);
   assert(!("correctAnswer" in publicQuestion) && !("acceptedAnswers" in publicQuestion), "Classroom public question does not contain correctAnswer.");
+  assert(publicQuestion.choices.length === 4, "Public classroom question includes multiple-choice answers.");
 }
 
 runQuestionEngineTests();
