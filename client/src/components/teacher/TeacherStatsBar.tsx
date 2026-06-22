@@ -1,3 +1,4 @@
+import { useLanguage } from "../../i18n";
 import type { TeacherDashboardStats } from "./teacherDashboardView";
 
 interface TeacherStatsBarProps {
@@ -5,17 +6,31 @@ interface TeacherStatsBarProps {
 }
 
 export function TeacherStatsBar({ stats }: TeacherStatsBarProps) {
+  const { language } = useLanguage();
+  const labels = language === "en" ? {
+    accuracy: "Accuracy",
+    answers: "Answers",
+    averageTime: "Average time",
+    students: "Students",
+    events: "Events",
+    leader: "Leader"
+  } : {
+    accuracy: "דיוק",
+    answers: "תשובות",
+    averageTime: "זמן ממוצע",
+    students: "תלמידים",
+    events: "אירועים",
+    leader: "מוביל"
+  };
   const accuracy = stats.classAccuracy === null ? "-" : `${stats.classAccuracy}%`;
   const averageResponse = stats.averageResponseTimeMs ? `${(stats.averageResponseTimeMs / 1000).toFixed(1)}s` : "-";
 
   return (
-    <section className="grid gap-2 rounded-lg border border-white/10 bg-white/[0.045] p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-      <StatPill label="דיוק" value={accuracy} />
-      <StatPill label="תשובות" value={stats.totalAnswers} />
-      <StatPill label="זמן ממוצע" value={averageResponse} />
-      <StatPill label="תלמידים" value={stats.totalStudents} />
-      <StatPill label="אירועים" value={stats.liveEventsCount} />
-      <StatPill label="מוביל" value={stats.currentLeaderName ?? "-"} wide />
+    <section className="grid gap-2 rounded-lg border border-white/10 bg-white/[0.045] p-2 sm:grid-cols-2 lg:grid-cols-4">
+      <StatPill label={labels.accuracy} value={accuracy} />
+      <StatPill label={labels.answers} value={stats.totalAnswers} />
+      <StatPill label={labels.averageTime} value={averageResponse} />
+      <StatPill label={labels.students} value={stats.totalStudents} />
     </section>
   );
 }

@@ -41,7 +41,6 @@ export function buildJoinLink(roomCode: string) {
     : window.location.origin;
   const url = new URL(baseUrl);
   url.search = "";
-  url.searchParams.set("room", roomCode);
   return url.toString();
 }
 

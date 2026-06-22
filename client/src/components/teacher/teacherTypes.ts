@@ -1,7 +1,7 @@
 import type { CarId, RacePhase, RoomSettings, TrackTheme } from "../../game/types/messages";
 
 export type TeacherPlayerStatus = "JOINED" | "WAITING_APPROVAL" | "APPROVED" | "RACING" | "FINISHED" | "KICKED" | "REMOVED" | "DISCONNECTED";
-export type TeacherDashboardView = "create" | "lobby" | "live" | "results" | "closed";
+export type TeacherDashboardView = "overview" | "create" | "lobby" | "live" | "results" | "closed";
 export type TeacherLiveTransportState = "idle" | "connecting_sse" | "sse_connected" | "sse_error" | "polling_fallback" | "stopped";
 export type TeacherRoomLifecycleStatus = "DRAFT" | "CREATED" | "WAITING" | "RACING" | "FINISHED" | "CLOSED" | "DELETED";
 export type Difficulty = "EASY" | "MEDIUM" | "HARD";

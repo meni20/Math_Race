@@ -7,6 +7,7 @@ export interface ClassroomRoomSummary {
   id: string;
   teacherId: string | null;
   roomCode: string;
+  joinCode: string;
   raceName: string;
   className: string | null;
   status: ClassroomRoomStatus;
@@ -35,7 +36,7 @@ const ROOM_EVENTS_TABLE = "room_events";
 const DEFAULT_TARGET_SCORE = 300;
 const MIN_TARGET_SCORE = 50;
 const MAX_TARGET_SCORE = 10000;
-const OPTIONAL_CLASSROOM_ROOM_COLUMNS = new Set(["target_score"]);
+const OPTIONAL_CLASSROOM_ROOM_COLUMNS = new Set(["target_score", "join_code"]);
 const OPTIONAL_ROOM_PARTICIPANT_COLUMNS = new Set([
   "timeout_answers",
   "score",
@@ -60,6 +61,15 @@ function settingsValue(settings: RoomSettings | undefined | null, fallbackRoomCo
       : DEFAULT_TARGET_SCORE,
     roomCode: fallbackRoomCode
   };
+}
+
+export function buildClassroomJoinCode(roomCode: string) {
+  const value = roomCode.trim().toUpperCase();
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash * 31) + value.charCodeAt(index)) >>> 0;
+  }
+  return String((hash % 900000) + 100000);
 }
 
 function errorText(error: unknown) {
@@ -194,10 +204,12 @@ function sortedPlayersByProgress(room: GameRoomStateRecord) {
 
 function mapRoomRow(row: Record<string, unknown>): ClassroomRoomSummary {
   const targetScore = Number(row.target_score ?? DEFAULT_TARGET_SCORE);
+  const roomCode = String(row.room_code ?? "");
   return {
     id: String(row.id ?? ""),
     teacherId: row.teacher_id ? String(row.teacher_id) : null,
-    roomCode: String(row.room_code ?? ""),
+    roomCode,
+    joinCode: String(row.join_code ?? "") || buildClassroomJoinCode(roomCode),
     raceName: String(row.race_name ?? "Classroom Math Race"),
     className: row.class_name ? String(row.class_name) : null,
     status: String(row.status ?? "WAITING") as ClassroomRoomStatus,
@@ -222,15 +234,27 @@ function mapRoomRow(row: Record<string, unknown>): ClassroomRoomSummary {
 }
 
 export async function findClassroomRoom(admin: SupabaseClient, roomCode: string) {
-  const { data, error } = await admin
+  const byRoomCode = await admin
     .from(CLASSROOM_ROOMS_TABLE)
     .select("*")
     .eq("room_code", roomCode)
     .maybeSingle();
-  if (error) {
-    throw error;
+  if (byRoomCode.error) {
+    throw byRoomCode.error;
   }
-  return data ? mapRoomRow(data as Record<string, unknown>) : null;
+  if (byRoomCode.data) {
+    return mapRoomRow(byRoomCode.data as Record<string, unknown>);
+  }
+
+  const byJoinCode = await admin
+    .from(CLASSROOM_ROOMS_TABLE)
+    .select("*")
+    .eq("join_code", roomCode)
+    .maybeSingle();
+  if (byJoinCode.error) {
+    throw byJoinCode.error;
+  }
+  return byJoinCode.data ? mapRoomRow(byJoinCode.data as Record<string, unknown>) : null;
 }
 
 export async function upsertClassroomRoomFromState(admin: SupabaseClient, room: GameRoomStateRecord) {
@@ -245,6 +269,7 @@ export async function upsertClassroomRoomFromState(admin: SupabaseClient, room: 
   const row: Record<string, unknown> = {
     teacher_id: room.teacherSessionId,
     room_code: room.roomId,
+    join_code: buildClassroomJoinCode(room.roomId),
     race_name: settings.raceName,
     class_name: room.className ?? null,
     status,

@@ -5,18 +5,33 @@ import { TeacherLiveRaceDashboard } from "./TeacherLiveRaceDashboard";
 import { TeacherRaceHeader } from "./TeacherRaceHeader";
 import { TeacherRoomsDrawer } from "./TeacherRoomsDrawer";
 import { TeacherRoomLobby } from "./TeacherRoomLobby";
+import { ThemeToggle } from "../ThemeToggle";
 import type { TeacherDashboardView, TeacherEvent, TeacherRaceConfig, TeacherRoomSnapshot, TeacherRoomSummary } from "./teacherTypes";
 import { DEFAULT_TEACHER_CONFIG, buildRandomId, normalizeTeacherConfig } from "./teacherUtils";
 import { archiveStaleClassroomRooms, getClassroomAdapterInfo } from "../../game/network/classroomRooms";
 import { getActiveSyncDebugState } from "../../game/sync/syncLifecycle";
+import { navigateToRaceResults, saveRaceResults } from "../../game/results/raceResults";
 import { useLanguage } from "../../i18n";
+import { useTheme } from "../../theme";
 
 type TeacherConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
-export function TeacherDashboard() {
-  const { t } = useLanguage();
+interface TeacherDashboardProps {
+  embedded?: boolean;
+  suppressInitialCreate?: boolean;
+  onRequestClose?: () => void;
+}
+
+export function TeacherDashboard({
+  embedded = false,
+  suppressInitialCreate = false,
+  onRequestClose
+}: TeacherDashboardProps = {}) {
+  const { t, language } = useLanguage();
+  const { theme } = useTheme();
   const clientRef = useRef<TeacherGameClient | null>(null);
   const previousRanksRef = useRef<Record<string, number>>({});
+  const navigatedResultsRef = useRef("");
   const previousPlayersRef = useRef<Record<string, {
     rank: number;
     status: string;
@@ -27,7 +42,7 @@ export function TeacherDashboard() {
   }>>({});
   const [connection, setConnection] = useState<TeacherConnectionStatus>("idle");
   const [connectionMessage, setConnectionMessage] = useState("");
-  const [view, setView] = useState<TeacherDashboardView>("create");
+  const [view, setView] = useState<TeacherDashboardView>(suppressInitialCreate ? "overview" : "create");
   const [config, setConfig] = useState<TeacherRaceConfig>(DEFAULT_TEACHER_CONFIG);
   const [snapshot, setSnapshot] = useState<TeacherRoomSnapshot | null>(null);
   const [rooms, setRooms] = useState<TeacherRoomSummary[]>([]);
@@ -103,6 +118,36 @@ export function TeacherDashboard() {
       setView("lobby");
     }
   }, [snapshot, view]);
+
+  useEffect(() => {
+    if (!snapshot || snapshot.players.length === 0 || navigatedResultsRef.current === snapshot.roomId) {
+      return;
+    }
+    const finished = snapshot.lifecycleStatus === "FINISHED" || snapshot.racePhase === "finish" || snapshot.raceStopped;
+    if (!finished) {
+      return;
+    }
+    const saved = saveRaceResults({
+      sessionId: snapshot.roomId,
+      roomSettings: snapshot.roomSettings,
+      raceStartedAtMs: snapshot.raceStartedAtMs,
+      raceFinishedAtMs: snapshot.raceStoppedAtMs || Date.now(),
+      players: snapshot.players.map((player) => ({
+        playerId: player.playerId,
+        name: player.name,
+        score: player.score,
+        correctAnswers: player.correctAnswers,
+        wrongAnswers: player.wrongAnswers,
+        timeoutAnswers: player.timeoutAnswers,
+        averageAnswerTimeMs: player.averageAnswerTimeMs,
+        routeMode: player.routeMode
+      }))
+    });
+    if (saved) {
+      navigatedResultsRef.current = snapshot.roomId;
+      navigateToRaceResults(snapshot.roomId);
+    }
+  }, [snapshot]);
 
   useEffect(() => {
     if (!snapshot) {
@@ -194,7 +239,9 @@ export function TeacherDashboard() {
   const roomIsTerminal = snapshot?.lifecycleStatus === "CLOSED" || snapshot?.lifecycleStatus === "DELETED";
   const hasStartableStudents = activePlayers.length > 0;
   const canStart = Boolean(snapshot && !roomIsTerminal && snapshot.racePhase === "lobby" && hasStartableStudents);
-  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore} נק'` : `${config.targetScore} נק'`;
+  const canEnd = Boolean(snapshot && !roomIsTerminal && snapshot.racePhase !== "finish");
+  const pointsSuffix = language === "en" ? "pts" : "נק'";
+  const targetLabel = snapshot ? `${snapshot.roomSettings.targetScore} ${pointsSuffix}` : `${config.targetScore} ${pointsSuffix}`;
 
   const createRace = async () => {
     if (adapterInfo.mode === "unavailable") {
@@ -259,6 +306,9 @@ export function TeacherDashboard() {
   };
 
   const endRace = () => {
+    if (!canEnd) {
+      return;
+    }
     void clientRef.current?.returnToLobby().then(refreshRooms).catch((error) => {
       const message = error instanceof Error ? error.message : "לא ניתן לסיים את המרוץ.";
       setLastClassroomError(message);
@@ -278,7 +328,7 @@ export function TeacherDashboard() {
     setEvents([]);
     previousRanksRef.current = {};
     previousPlayersRef.current = {};
-    setView("create");
+    setView(suppressInitialCreate ? "overview" : "create");
   };
 
   const openRoom = (roomCode: string) => {
@@ -300,16 +350,17 @@ export function TeacherDashboard() {
     setEvents([]);
     previousRanksRef.current = {};
     previousPlayersRef.current = {};
-    setView("create");
+    setView(suppressInitialCreate ? "overview" : "create");
   };
 
   const goToStudentMode = () => {
+    if (embedded && onRequestClose) {
+      onRequestClose();
+      return;
+    }
     void clientRef.current?.disconnect();
-    const url = new URL(window.location.href);
-    url.searchParams.delete("teacher");
-    const nextPath = `${url.pathname}${url.search}${url.hash}` || "/";
-    window.history.replaceState(null, "", nextPath);
-    window.location.assign(nextPath);
+    window.history.pushState(null, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
 
   const deleteRoom = (roomCode: string) => {
@@ -353,36 +404,45 @@ export function TeacherDashboard() {
   };
 
   const connectedLabel = connection === "connected"
-    ? "מחובר"
+    ? (language === "en" ? "Connected" : "מחובר")
     : connection === "connecting"
-      ? "מתחבר"
+      ? (language === "en" ? "Connecting" : "מתחבר")
       : connection === "error"
-        ? "מוגבל"
-        : "לא מחובר";
+        ? (language === "en" ? "Limited" : "מוגבל")
+        : (language === "en" ? "Not connected" : "לא מחובר");
+  const showThemeToggle = !embedded && view !== "live";
+  const lightUiClass = theme === "light" && showThemeToggle ? "theme-light-ui" : "";
+  const shellClass = embedded
+    ? "relative h-full overflow-y-auto rounded-lg bg-slate-950 text-slate-100"
+    : `absolute inset-0 z-40 overflow-y-auto text-slate-100 ${view === "create" ? "pointer-events-none bg-transparent" : "pointer-events-auto bg-slate-950"}`;
 
   return (
-    <section className="pointer-events-auto absolute inset-0 z-40 overflow-y-auto bg-slate-950 text-slate-100">
+    <section className={`${shellClass} ${lightUiClass}`}>
+      {showThemeToggle ? (
+        <div className="pointer-events-auto fixed bottom-5 right-5 z-[90]">
+          <ThemeToggle />
+        </div>
+      ) : null}
       <div className="mx-auto flex min-h-screen w-full max-w-[96rem] flex-col px-3 py-3 sm:px-5 lg:px-6">
+        {view !== "create" ? (
         <TeacherRaceHeader
           title={snapshot?.roomSettings.raceName ?? config.raceName}
           snapshot={snapshot}
-          connectionLabel={connectedLabel}
           targetLabel={targetLabel}
           playerCount={activePlayers.length}
-          localDev={adapterInfo.mode === "local-dev"}
           canStart={canStart}
+          canEnd={canEnd}
           onStart={startRace}
           onEnd={endRace}
-          onCloseRoom={closeCurrentView}
           onNewRoom={resetDashboard}
           onOpenRooms={() => setRoomsDrawerOpen(true)}
-          onStudentMode={goToStudentMode}
         />
+        ) : null}
 
-        {classroomInfoMessage ? (
+        {view !== "create" && classroomInfoMessage ? (
           <p className="mt-3 rounded-lg border border-amber-200/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">{classroomInfoMessage}</p>
         ) : null}
-        {import.meta.env.DEV ? (
+        {view !== "create" && import.meta.env.DEV ? (
           <details className="mt-3 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300">
             <summary className="cursor-pointer font-bold uppercase tracking-[0.12em] text-cyan-100/75">
               אבחון פיתוח
@@ -434,14 +494,82 @@ export function TeacherDashboard() {
         ) : null}
 
         <main className="mt-3 min-w-0 flex-1">
+          {view === "overview" ? (
+            <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5 shadow-[0_18px_50px_rgba(2,8,23,0.24)]">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100/70">Teacher dashboard</p>
+                  <h2 className="mt-1 text-2xl font-black text-white">{t("rooms")}</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                    {language === "en"
+                      ? "Embedded teacher overview for admins. Open an existing room from the list below, or use Create room from the admin quick actions."
+                      : "תצוגת לוח מורה בתוך מסך האדמין. אפשר לפתוח חדר קיים מהרשימה, ויצירת חדר נשארת בכפתור יצירת חדר במסך האדמין."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={refreshRooms}
+                  disabled={roomsLoading}
+                  className="rounded-full border border-cyan-100/25 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {roomsLoading ? t("refreshing") : (language === "en" ? "Refresh" : "רענון")}
+                </button>
+              </div>
+              {lastClassroomError ? (
+                <p className="mt-4 rounded-lg border border-amber-200/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">{lastClassroomError}</p>
+              ) : null}
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-cyan-100/15 bg-slate-950/34 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-100/70">{t("activeRooms")}</p>
+                  <p className="mt-2 text-3xl font-black text-white">{rooms.filter((room) => room.status === "WAITING" || room.status === "CREATED" || room.status === "DRAFT").length}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-100/15 bg-slate-950/34 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-emerald-100/70">{t("runningRooms")}</p>
+                  <p className="mt-2 text-3xl font-black text-white">{rooms.filter((room) => room.status === "RACING").length}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950/34 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-300">{t("savedRooms")}</p>
+                  <p className="mt-2 text-3xl font-black text-white">{rooms.length}</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3">
+                {rooms.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-cyan-100/20 bg-slate-950/28 px-4 py-8 text-center text-sm font-bold text-slate-300">{t("noRooms")}</p>
+                ) : rooms.slice(0, 8).map((room) => (
+                  <button
+                    key={room.id || room.roomCode}
+                    type="button"
+                    onClick={() => openRoom(room.roomCode)}
+                    className="rounded-lg border border-white/10 bg-white/[0.045] px-4 py-3 text-start transition hover:border-cyan-100/35 hover:bg-cyan-300/10"
+                  >
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-black text-white">{room.raceName}</span>
+                      <span className="rounded-full border border-cyan-100/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-100">{room.status}</span>
+                    </span>
+                    <span className="mt-1 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">
+                      {room.roomCode} · {room.currentPlayers}/{room.maxPlayers} {t("students")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {view === "create" ? (
-            <TeacherCreateRacePanel
-              config={config}
-              connecting={creatingRoom || connection === "connecting"}
-              disabledReason={adapterInfo.mode === "unavailable" ? adapterInfo.message : undefined}
-              onConfigChange={setConfig}
-              onCreate={createRace}
-            />
+            <div
+              className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-md"
+              onMouseDown={goToStudentMode}
+            >
+              <div onMouseDown={(event) => event.stopPropagation()}>
+              <TeacherCreateRacePanel
+                config={config}
+                connecting={creatingRoom || connection === "connecting"}
+                disabledReason={adapterInfo.mode === "unavailable" ? adapterInfo.message : undefined}
+                onConfigChange={setConfig}
+                onCreate={createRace}
+              />
+              </div>
+            </div>
           ) : null}
 
           {view === "lobby" && snapshot ? (

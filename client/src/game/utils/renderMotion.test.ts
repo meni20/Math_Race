@@ -4,8 +4,7 @@ import {
   getClassroomScoreProgressRatio,
   getClassroomScoreVisualPositionMeters,
   getClassroomVisualDriveMeters,
-  getClassroomVisualTrackMeters,
-  shouldShowClassroomFinishGate
+  getClassroomVisualTrackMeters
 } from "./renderMotion";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -276,8 +275,8 @@ export function runRenderMotionTests() {
     lastFrameAtMs: 12000
   });
   assert(
-    getClassroomVisualDriveMeters(afterTerminalFrame.p1) === getClassroomVisualTrackMeters(),
-    "Classroom finished rendered player snaps visual drive to the classroom finish line."
+    getClassroomVisualDriveMeters(afterTerminalFrame.p1) === getClassroomVisualDriveMeters(terminalPrevious),
+    "Classroom score finish does not snap visual drive to a finish line."
   );
   assert(
     getClassroomVisualDriveMeters(afterSecondTerminalFrame.p1) === getClassroomVisualDriveMeters(afterTerminalFrame.p1),
@@ -292,8 +291,6 @@ export function runRenderMotionTests() {
     "Classroom visual position is normalized to the classroom visual track."
   );
   assert(getClassroomVisualTrackMeters() < 3000, "Classroom visual finish does not use the old 3000 meter finish distance.");
-  assert(!shouldShowClassroomFinishGate(0.5, false), "Classroom finish gate stays hidden before late score progress.");
-  assert(shouldShowClassroomFinishGate(0.85, false), "Classroom finish gate appears at late score progress.");
 }
 
 runRenderMotionTests();

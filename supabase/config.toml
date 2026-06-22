@@ -467,3 +467,6 @@ verify_jwt = false
 
 [functions.list-active-classroom-rooms]
 verify_jwt = false
+
+[functions.admin-list-users]
+verify_jwt = false

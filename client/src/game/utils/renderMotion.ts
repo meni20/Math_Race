@@ -9,7 +9,6 @@ const CLASSROOM_MIN_SPEED_KMH = 25;
 const CLASSROOM_MAX_SPEED_KMH = 180;
 const CLASSROOM_VISUAL_SPEED_MULTIPLIER = 2.1;
 const CLASSROOM_SPEED_SMOOTHING = 8;
-export const CLASSROOM_FINISH_GATE_PROGRESS_RATIO = 0.85;
 const MIN_SPEED_MPS = 18;
 const BOOST_EXTRA_SPEED_MPS = 30;
 const WRONG_ANSWER_SPEED_PENALTY_MPS = 7.5;
@@ -328,10 +327,6 @@ export function getClassroomVisualDriveMeters(player: Pick<PlayerSnapshot, "posi
   return Math.max(0, player.positionMeters ?? 0);
 }
 
-export function shouldShowClassroomFinishGate(progressRatio: number, raceFinished: boolean) {
-  return raceFinished || Math.max(0, Math.min(1, progressRatio)) >= CLASSROOM_FINISH_GATE_PROGRESS_RATIO;
-}
-
 function advanceClassroomRenderedPlayer(
   previousPlayer: PlayerSnapshot | undefined,
   targetPlayer: PlayerSnapshot,
@@ -349,16 +344,10 @@ function advanceClassroomRenderedPlayer(
     : scoreProgressPosition;
   const terminal = raceStopped || targetPlayer.finished || targetPlayer.racePhase === "finish";
   if (terminal) {
-    const terminalScoreProgressPosition = targetPlayer.finished
-      ? CLASSROOM_VISUAL_TRACK_METERS
-      : Math.max(previousScoreProgressPosition, scoreProgressPosition);
-    const terminalVisualDriveMeters = targetPlayer.finished
-      ? CLASSROOM_VISUAL_TRACK_METERS
-      : previousVisualDriveMeters;
     return {
       ...targetPlayer,
-      positionMeters: terminalScoreProgressPosition,
-      visualDriveMeters: terminalVisualDriveMeters,
+      positionMeters: Math.max(previousScoreProgressPosition, scoreProgressPosition),
+      visualDriveMeters: previousVisualDriveMeters,
       speedMps: 0
     };
   }

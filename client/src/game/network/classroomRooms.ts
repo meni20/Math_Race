@@ -6,8 +6,10 @@ import {
   readLocalClassroomRoom,
   subscribeLocalClassroomRoom,
   updateLocalClassroomRoom,
+  writeLocalClassroomRoom,
   type LocalClassroomRoom
 } from "./localClassroom";
+import { isFirebaseClassroomEnabled, listFirebaseClassroomRooms, readFirebaseClassroomRoom } from "./firebaseClassroom";
 import { getSupabaseTransportConfig } from "./transportConfig";
 import type { GameStateUpdateMessage, RoomSettings } from "../types/messages";
 import { normalizeRoomSettings } from "../utils/roomSettings";
@@ -20,6 +22,7 @@ export interface ClassroomRoomSummary {
   id: string;
   teacherId: string | null;
   roomCode: string;
+  joinCode?: string | null;
   raceName: string;
   className: string | null;
   status: ClassroomRoomLifecycleStatus;
@@ -121,8 +124,21 @@ let classroomRoomsClient: SupabaseClient | null = null;
 let didLogDiagnostics = false;
 const LOCAL_DEV_SESSION_STORAGE_KEY = "mathRace.classroomDevSessionId";
 
+export function buildClassroomJoinCode(roomCode: string) {
+  const value = roomCode.trim().toUpperCase();
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash * 31) + value.charCodeAt(index)) >>> 0;
+  }
+  return String((hash % 900000) + 100000);
+}
+
 function isExplicitLocalDevEnabled() {
   return String(import.meta.env.VITE_CLASSROOM_LOCAL_DEV ?? "").toLowerCase() === "true";
+}
+
+function shouldUseLocalClassroomAdapter() {
+  return Boolean(import.meta.env.DEV) || isExplicitLocalDevEnabled() || isFirebaseClassroomEnabled();
 }
 
 function getLocalDevSessionId() {
@@ -149,27 +165,29 @@ function getLocalDevSessionId() {
 
 export function getClassroomAdapterInfo(): ClassroomAdapterInfo {
   const supabaseConfigured = Boolean(getSupabaseTransportConfig());
-  const localDevEnabled = !supabaseConfigured && (Boolean(import.meta.env.DEV) || isExplicitLocalDevEnabled());
-  const info: ClassroomAdapterInfo = supabaseConfigured
+  const localDevEnabled = isExplicitLocalDevEnabled()
+    || isFirebaseClassroomEnabled()
+    || (!supabaseConfigured && shouldUseLocalClassroomAdapter());
+  const info: ClassroomAdapterInfo = localDevEnabled
+    ? {
+      mode: "local-dev",
+      supabaseConfigured,
+      localDevEnabled,
+      message: isFirebaseClassroomEnabled() ? "Firebase classroom cloud mode" : "Local classroom dev mode"
+    }
+    : supabaseConfigured
     ? {
       mode: "supabase",
       supabaseConfigured,
       localDevEnabled: false,
       message: "Using Supabase classroom database."
     }
-    : localDevEnabled
-      ? {
-        mode: "local-dev",
-        supabaseConfigured,
-        localDevEnabled,
-        message: "Local classroom dev mode"
-      }
-      : {
-        mode: "unavailable",
-        supabaseConfigured,
-        localDevEnabled,
-        message: "Supabase is not configured. Classroom rooms cannot be created."
-      };
+    : {
+      mode: "unavailable",
+      supabaseConfigured,
+      localDevEnabled,
+      message: "Supabase is not configured. Classroom rooms cannot be created."
+    };
 
   if (import.meta.env.DEV && !didLogDiagnostics) {
     didLogDiagnostics = true;
@@ -295,6 +313,7 @@ function localRoomToSummary(room: LocalClassroomRoom): ClassroomRoomSummary {
     id: room.roomId,
     teacherId: room.teacherSessionId ?? null,
     roomCode: room.roomId,
+    joinCode: room.joinCode ?? buildClassroomJoinCode(room.roomId),
     raceName: settings.raceName,
     className: null,
     status: deriveLocalStatus(room),
@@ -388,9 +407,24 @@ class SupabaseClassroomRoomService implements ClassroomRoomService {
 class LocalDevClassroomRoomService implements ClassroomRoomService {
   readonly mode = "local-dev" as const;
 
+  private async listSyncedRooms() {
+    if (!isFirebaseClassroomEnabled()) {
+      return listLocalClassroomRooms();
+    }
+    try {
+      return await listFirebaseClassroomRooms();
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn("[firebase-classroom] falling back to local rooms", error);
+      }
+      return listLocalClassroomRooms();
+    }
+  }
+
   async createRoom(input: ClassroomCreateRoomInput) {
     const room = createLocalClassroomRoom(input.roomCode, input.roomSettings);
     room.teacherSessionId = input.teacherSessionId;
+    room.joinCode = buildClassroomJoinCode(room.roomId);
     room.devSessionId = getLocalDevSessionId();
     room.requiresApproval = false;
     room.isListed = true;
@@ -405,23 +439,39 @@ class LocalDevClassroomRoomService implements ClassroomRoomService {
   }
 
   async listTeacherRooms(teacherSessionId: string) {
-    return listLocalClassroomRooms()
-      .filter((room) => room.devSessionId === getLocalDevSessionId())
+    const rooms = await this.listSyncedRooms();
+    return rooms
       .filter((room) => !room.deletedAtMs && (!room.teacherSessionId || room.teacherSessionId === teacherSessionId))
       .map(localRoomToSummary)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   async listActiveRooms() {
-    return listLocalClassroomRooms()
-      .filter((room) => room.devSessionId === getLocalDevSessionId())
+    const rooms = await this.listSyncedRooms();
+    return rooms
       .map(localRoomToSummary)
       .filter(isJoinable)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   async getRoomByCode(roomCode: string) {
-    const room = readLocalClassroomRoom(roomCode);
+    const normalizedInput = roomCode.trim().toUpperCase();
+    const cloudRooms = await this.listSyncedRooms();
+    const directCloudRoom = isFirebaseClassroomEnabled() && !/^\d{6}$/.test(normalizedInput)
+      ? await readFirebaseClassroomRoom(normalizedInput).catch(() => null)
+      : null;
+    const room = directCloudRoom
+      ?? readLocalClassroomRoom(normalizedInput)
+      ?? cloudRooms.find((candidate) => (
+        (candidate.joinCode ?? buildClassroomJoinCode(candidate.roomId)) === normalizedInput
+      ))
+      ?? listLocalClassroomRooms().find((candidate) => (
+        (candidate.joinCode ?? buildClassroomJoinCode(candidate.roomId)) === normalizedInput
+      ))
+      ?? null;
+    if (room) {
+      writeLocalClassroomRoom(room, { syncRemote: false });
+    }
     return room ? localRoomToSummary(room) : null;
   }
 
@@ -432,9 +482,6 @@ class LocalDevClassroomRoomService implements ClassroomRoomService {
     let archivedCount = 0;
 
     for (const room of listLocalClassroomRooms()) {
-      if (room.devSessionId !== getLocalDevSessionId()) {
-        continue;
-      }
       if (room.roomId === excludeRoomCode) {
         continue;
       }

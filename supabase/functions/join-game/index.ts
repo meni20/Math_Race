@@ -115,6 +115,7 @@ Deno.serve(async (request) => {
     if (classroomRoom.status !== "WAITING" && !(classroomRoom.status === "RACING" && classroomRoom.allowMidGameJoin)) {
       return jsonResponse({ error: buildError("ROOM_NOT_JOINABLE", "This classroom room is not joinable right now.", normalizedPayload.roomId, normalizedPayload.playerId) });
     }
+    normalizedPayload.roomId = classroomRoom.roomCode;
     createdNewPlayer = !(await playerExistsInRoom(admin, normalizedPayload.roomId, normalizedPayload.playerId));
     mutationStarted = true;
     const result = await runRoomMutation(

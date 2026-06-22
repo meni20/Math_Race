@@ -3,6 +3,8 @@ import { useGameStore } from "../store/useGameStore";
 import type { PlayerSnapshot } from "../types/messages";
 import { advanceRenderedPlayers } from "./renderMotion";
 
+const UI_SNAPSHOT_INTERVAL_MS = 125;
+
 interface RenderedPlayersSnapshot {
   nowMs: number;
   playerId: string;
@@ -55,13 +57,22 @@ function buildRenderedSnapshot(
 
 const renderedPlayersStore = (() => {
   let snapshot = EMPTY_RENDERED_SNAPSHOT;
+  let uiSnapshot = EMPTY_RENDERED_SNAPSHOT;
   let renderedPlayers: Record<string, PlayerSnapshot> = {};
   let lastFrameAtMs = 0;
+  let lastUiPublishAtMs = 0;
   let animationFrameId = 0;
   const listeners = new Set<() => void>();
+  const uiListeners = new Set<() => void>();
 
   const publish = () => {
     for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  const publishUi = () => {
+    for (const listener of uiListeners) {
       listener();
     }
   };
@@ -74,10 +85,23 @@ const renderedPlayersStore = (() => {
   };
 
   const tick = () => {
-    advanceFrame(Date.now());
-    publish();
+    const nowMs = Date.now();
+    advanceFrame(nowMs);
 
     if (listeners.size > 0) {
+      publish();
+    }
+
+    if (uiListeners.size > 0 && nowMs - lastUiPublishAtMs >= UI_SNAPSHOT_INTERVAL_MS) {
+      uiSnapshot = snapshot;
+      lastUiPublishAtMs = nowMs;
+      publishUi();
+      if (import.meta.env.DEV) {
+        recordUiPublish(nowMs);
+      }
+    }
+
+    if (listeners.size > 0 || uiListeners.size > 0) {
       animationFrameId = window.requestAnimationFrame(tick);
       return;
     }
@@ -94,7 +118,12 @@ const renderedPlayersStore = (() => {
   };
 
   const stopAnimationLoop = () => {
-    if (typeof window === "undefined" || animationFrameId === 0 || listeners.size > 0) {
+    if (
+      typeof window === "undefined"
+      || animationFrameId === 0
+      || listeners.size > 0
+      || uiListeners.size > 0
+    ) {
       return;
     }
 
@@ -103,6 +132,7 @@ const renderedPlayersStore = (() => {
   };
 
   advanceFrame(Date.now());
+  uiSnapshot = snapshot;
 
   return {
     subscribe(listener: () => void) {
@@ -118,9 +148,43 @@ const renderedPlayersStore = (() => {
     },
     getSnapshot() {
       return snapshot;
+    },
+    subscribeUi(listener: () => void) {
+      uiListeners.add(listener);
+      advanceFrame(Date.now());
+      uiSnapshot = snapshot;
+      lastUiPublishAtMs = Date.now();
+      listener();
+      ensureAnimationLoop();
+
+      return () => {
+        uiListeners.delete(listener);
+        stopAnimationLoop();
+      };
+    },
+    getUiSnapshot() {
+      return uiSnapshot;
     }
   };
 })();
+
+let uiPublishWindowStartedAtMs = 0;
+let uiPublishCount = 0;
+
+function recordUiPublish(nowMs: number) {
+  if (uiPublishWindowStartedAtMs <= 0) {
+    uiPublishWindowStartedAtMs = nowMs;
+  }
+  uiPublishCount += 1;
+  if (nowMs - uiPublishWindowStartedAtMs < 5000) {
+    return;
+  }
+
+  const updatesPerSecond = uiPublishCount / ((nowMs - uiPublishWindowStartedAtMs) / 1000);
+  console.debug("[rendered-players-ui] throttled updates/sec", updatesPerSecond.toFixed(1));
+  uiPublishWindowStartedAtMs = nowMs;
+  uiPublishCount = 0;
+}
 
 export function getRenderedPlayersSnapshot() {
   return renderedPlayersStore.getSnapshot();
@@ -131,5 +195,13 @@ export function useRenderedPlayers() {
     renderedPlayersStore.subscribe,
     renderedPlayersStore.getSnapshot,
     renderedPlayersStore.getSnapshot
+  );
+}
+
+export function useRenderedPlayersUi() {
+  return useSyncExternalStore(
+    renderedPlayersStore.subscribeUi,
+    renderedPlayersStore.getUiSnapshot,
+    renderedPlayersStore.getUiSnapshot
   );
 }

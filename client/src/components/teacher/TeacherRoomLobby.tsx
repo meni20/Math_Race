@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { buildClassroomJoinCode } from "../../game/network/classroomRooms";
 import type { TeacherPlayerView, TeacherRoomSnapshot } from "./teacherTypes";
 import { buildJoinLink, buildQrCells } from "./teacherUtils";
 import { TeacherPlayerList } from "./TeacherPlayerList";
@@ -12,10 +13,11 @@ interface TeacherRoomLobbyProps {
 
 export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: TeacherRoomLobbyProps) {
   const joinLink = buildJoinLink(snapshot.roomId);
+  const joinCode = buildClassroomJoinCode(snapshot.roomId);
   const qrCells = useMemo(() => buildQrCells(joinLink), [joinLink]);
   const players: TeacherPlayerView[] = snapshot.players;
   const copyRoomCode = () => {
-    void navigator.clipboard?.writeText(snapshot.roomId);
+    void navigator.clipboard?.writeText(joinCode);
   };
   const copyJoinLink = () => {
     void navigator.clipboard?.writeText(joinLink);
@@ -26,10 +28,17 @@ export function TeacherRoomLobby({ snapshot, canStart, onRemove, onStart }: Teac
       <div className="rounded-lg border border-white/10 bg-white/6 p-5">
         <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100/70">קוד חדר</p>
         <p className="mt-2 text-5xl font-black tracking-[0.12em] text-white">{snapshot.roomId}</p>
-        <div className="mt-5 grid h-44 w-44 grid-cols-9 gap-1 rounded-lg bg-white p-3">
-          {qrCells.map((filled, index) => (
-            <span key={`${snapshot.roomId}-${index}`} className={filled ? "rounded-sm bg-slate-950" : "rounded-sm bg-white"} />
-          ))}
+        <div className="mt-5 flex flex-wrap items-start gap-5">
+          <div className="grid h-44 w-44 grid-cols-9 gap-1 rounded-lg bg-white p-3">
+            {qrCells.map((filled, index) => (
+              <span key={`${snapshot.roomId}-${index}`} className={filled ? "rounded-sm bg-slate-950" : "rounded-sm bg-white"} />
+            ))}
+          </div>
+          <div className="min-w-[13rem] rounded-lg border border-cyan-100/20 bg-cyan-300/10 p-4">
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-cyan-100/75">קוד התחברות</p>
+            <p className="mt-2 break-all text-3xl font-black tracking-[0.12em] text-white">{joinCode}</p>
+            <p className="mt-2 text-sm leading-5 text-slate-300">התלמיד מזין את הקוד הזה בחלון ההצטרפות.</p>
+          </div>
         </div>
         <label className="mt-4 block">
           <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100/70">קישור הצטרפות</span>

@@ -84,6 +84,7 @@ const DEMO_BASE_SPEED_MPS = 60 * KMH_TO_MPS;
 const DEMO_MIN_SPEED_MPS = 30 * KMH_TO_MPS;
 const DEMO_SPEED_MODIFIER_DURATION_MS = 5000;
 const MIN_DYNAMIC_TRACK_LENGTH_METERS = 360;
+const LOCAL_CLASSROOM_ACTIVE_PERSIST_MS = 1000;
 export const SOLO_BOT_OPTIONS = [1, 2, 3] as const;
 
 function buildQuestionId() {
@@ -104,6 +105,10 @@ function calculateDynamicTrackLengthMeters(roomSettings: RoomSettings) {
 
 function getTargetScore(session: DemoSession) {
   return Math.max(1, Math.trunc(session.roomSettings.targetScore ?? DEFAULT_TARGET_SCORE));
+}
+
+function getLocalRoomTargetScore(room: LocalClassroomRoom) {
+  return Math.max(1, Math.trunc(room.roomSettings.targetScore ?? DEFAULT_TARGET_SCORE));
 }
 
 export function isSoloScoreTargetReached(score: number | null | undefined, targetScore: number | null | undefined) {
@@ -414,6 +419,7 @@ export class DemoRaceClient {
   private session: DemoSession | null = null;
   private localClassroomMode = false;
   private localClassroomUnsubscribe: (() => void) | null = null;
+  private lastLocalClassroomPersistAtMs = 0;
 
   async connect(payload: ConnectPayload) {
     await this.disconnect();
@@ -515,6 +521,25 @@ export class DemoRaceClient {
   }
 
   leaveRoom() {
+    const session = this.session;
+    if (session && this.localClassroomMode && !isSoloRoomId(session.roomId)) {
+      updateLocalClassroomRoom(session.roomId, (room) => {
+        if (!room.players[session.localPlayerId]) {
+          return room;
+        }
+        const players = { ...room.players };
+        delete players[session.localPlayerId];
+        return {
+          ...room,
+          updatedAtMs: Date.now(),
+          removedPlayerIds: {
+            ...room.removedPlayerIds,
+            [session.localPlayerId]: Date.now()
+          },
+          players
+        };
+      });
+    }
     void this.disconnect();
     useGameStore.getState().setConnection("idle");
     useGameStore.getState().resetSession();
@@ -573,7 +598,7 @@ export class DemoRaceClient {
       scoreDeltaToSpeedDeltaMps(score.pointsDelta),
       DEMO_SPEED_MODIFIER_DURATION_MS
     );
-    this.recordAnswerStats(session.localPlayerId, resultType, answeredInMs);
+    this.recordAnswerStats(session.localPlayerId, resultType, answeredInMs, score.pointsDelta);
 
     const advanced = advanceQuestionStateAfterAnswer(session.questionState, question, resultType, now, getRoomDifficulty(session));
     session.questionState = advanced.state;
@@ -595,7 +620,7 @@ export class DemoRaceClient {
     this.applyPromptResult(session, advanced, now);
   }
 
-  private recordAnswerStats(playerId: string, resultType: QuestionResultType, answeredInMs: number) {
+  private recordAnswerStats(playerId: string, resultType: QuestionResultType, answeredInMs: number, pointsDelta = 0) {
     const session = this.session;
     const player = session?.players.find((entry) => entry.playerId === playerId);
     const correct = resultType === "CORRECT";
@@ -619,15 +644,24 @@ export class DemoRaceClient {
       if (!current) {
         return room;
       }
+      const targetScore = getLocalRoomTargetScore(room);
+      const nextScore = Math.max(0, Math.min(targetScore, Math.trunc(current.score ?? 0) + pointsDelta));
+      const finished = nextScore >= targetScore;
       const previousAnswers = (current.correctAnswers ?? 0) + (current.wrongAnswers ?? 0) + (current.timeoutAnswers ?? 0);
       const previousAverage = current.averageAnswerTimeMs ?? 0;
       const nextAnswers = previousAnswers + 1;
       return {
         ...room,
+        winnerPlayerId: finished && !room.winnerPlayerId ? playerId : room.winnerPlayerId,
         players: {
           ...room.players,
           [playerId]: {
             ...current,
+            score: nextScore,
+            positionMeters: nextScore,
+            lap: finished ? room.totalLaps : current.lap,
+            finished: finished || current.finished,
+            racePhase: finished ? "finish" : current.racePhase,
             correctAnswers: (current.correctAnswers ?? 0) + (correct ? 1 : 0),
             wrongAnswers: (current.wrongAnswers ?? 0) + (wrong ? 1 : 0),
             timeoutAnswers: (current.timeoutAnswers ?? 0) + (resultType === "TIMEOUT" ? 1 : 0),
@@ -853,6 +887,8 @@ export class DemoRaceClient {
 
     const updatedRoom: LocalClassroomRoom = {
       ...room,
+      tick: room.tick + 1,
+      updatedAtMs: now,
       removedPlayerIds: {
         ...room.removedPlayerIds,
         [payload.playerId]: 0
@@ -933,8 +969,10 @@ export class DemoRaceClient {
     const now = Date.now();
     const deltaSeconds = Math.max(0.04, Math.min(0.18, (now - this.lastTickAtMs) / 1000));
     this.lastTickAtMs = now;
+    const shouldPersistActiveTick = now - this.lastLocalClassroomPersistAtMs >= LOCAL_CLASSROOM_ACTIVE_PERSIST_MS;
+    let shouldPersistLifecycleTick = false;
 
-    updateLocalClassroomRoom(session.roomId, (room) => {
+    const updatedRoom = updateLocalClassroomRoom(session.roomId, (room) => {
       const localPlayer = room.players[session.localPlayerId];
       if (!localPlayer) {
         return room;
@@ -944,6 +982,7 @@ export class DemoRaceClient {
       const players = { ...room.players };
       if (racePhase === "starting" && now >= room.raceStartingAtMs) {
         racePhase = "active";
+        shouldPersistLifecycleTick = true;
         for (const player of Object.values(players)) {
           players[player.playerId] = { ...player, racePhase: "active" };
         }
@@ -953,11 +992,12 @@ export class DemoRaceClient {
         const sessionLocal = getLocalPlayer(session);
         const activeDelta = sessionLocal && now < sessionLocal.temporaryDeltaEndsAtMs ? sessionLocal.temporaryDeltaMps : 0;
         const effectiveSpeed = clampSpeed(DEMO_BASE_SPEED_MPS + activeDelta + Math.sin(now / 1200) * 0.6);
-        const nextPosition = Math.max(0, Math.min(room.trackLengthMeters, Math.trunc(localPlayer.score ?? 0)));
-        const finished = nextPosition >= room.trackLengthMeters;
+        const targetScore = getLocalRoomTargetScore(room);
+        const nextScorePosition = Math.max(0, Math.min(targetScore, Math.trunc(localPlayer.score ?? 0)));
+        const finished = nextScorePosition >= targetScore;
         players[localPlayer.playerId] = {
           ...localPlayer,
-          positionMeters: nextPosition,
+          positionMeters: nextScorePosition,
           speedMps: finished ? 0 : effectiveSpeed,
           lap: finished ? room.totalLaps : 0,
           finished,
@@ -967,9 +1007,13 @@ export class DemoRaceClient {
 
       const allFinished = Object.values(players).length > 0 && Object.values(players).every((player) => player.finished);
       const shouldFinish = racePhase === "active" && allFinished;
+      if (shouldFinish) {
+        shouldPersistLifecycleTick = true;
+      }
       const standings = Object.values(players).sort((left, right) => {
-        if (left.lap !== right.lap) {
-          return right.lap - left.lap;
+        const scoreDelta = Math.max(0, Math.trunc(right.score ?? 0)) - Math.max(0, Math.trunc(left.score ?? 0));
+        if (scoreDelta !== 0) {
+          return scoreDelta;
         }
         return right.positionMeters - left.positionMeters;
       });
@@ -984,9 +1028,19 @@ export class DemoRaceClient {
         winnerPlayerId: shouldFinish ? standings[0]?.playerId ?? null : room.winnerPlayerId,
         players
       };
+    }, {
+      persist: shouldPersistActiveTick,
+      syncRemote: shouldPersistActiveTick
     });
 
-    const latestRoom = readLocalClassroomRoom(session.roomId);
+    if (updatedRoom && shouldPersistLifecycleTick && !shouldPersistActiveTick) {
+      writeLocalClassroomRoom(updatedRoom);
+      this.lastLocalClassroomPersistAtMs = now;
+    } else if (shouldPersistActiveTick) {
+      this.lastLocalClassroomPersistAtMs = now;
+    }
+
+    const latestRoom = updatedRoom ?? readLocalClassroomRoom(session.roomId);
     if (latestRoom) {
       this.applyLocalClassroomRoom(latestRoom);
     }

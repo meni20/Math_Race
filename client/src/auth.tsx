@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { createUser, getCurrentUser, loginUser, logoutUser, type AuthUser, type UserRole } from "./game/network/authClient";
+import { changeUserPassword, createUser, getCurrentUser, loginUser, logoutUser, type AuthUser, type UserRole } from "./game/network/authClient";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -9,6 +9,7 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<AuthUser | null>;
   register: (username: string, password: string, role: UserRole) => Promise<AuthUser | null>;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, nextPassword: string) => Promise<AuthUser | null>;
   refreshUser: () => Promise<AuthUser | null>;
   clearError: () => void;
 }
@@ -84,6 +85,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const changePassword = useCallback(async (currentPassword: string, nextPassword: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const nextUser = await changeUserPassword(currentPassword, nextPassword);
+      setUser(nextUser);
+      return nextUser;
+    } catch (passwordError) {
+      const message = passwordError instanceof Error ? passwordError.message : "Cannot change password.";
+      setError(message);
+      throw passwordError;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(() => ({
     user,
     loading,
@@ -92,9 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     register,
     logout,
+    changePassword,
     refreshUser,
     clearError: () => setError("")
-  }), [error, loading, login, logout, refreshUser, register, user]);
+  }), [changePassword, error, loading, login, logout, refreshUser, register, user]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -17,11 +17,13 @@ import type {
   CarId
 } from "../types/messages";
 import { DemoRaceClient } from "./demoRace";
+import { isFirebaseClassroomEnabled } from "./firebaseClassroom";
 import { SupabaseGameClient } from "./supabaseGame";
 import { getConfiguredGameTransport, getGameBackendUrl } from "./transportConfig";
 
 const WEBSOCKET_SESSION_STORAGE_KEY = "asphalt8.websocket.session";
 const WEBSOCKET_RESUME_TOKEN_STORAGE_KEY = "asphalt8.websocket.resume-token";
+const WEBSOCKET_SYNC_INTERVAL_MS = 1000;
 
 interface GameErrorMessage {
   code?: string;
@@ -463,6 +465,11 @@ class GameSocketClient {
     ) {
       return "demo";
     }
+    const localClassroomEnabled = String(import.meta.env.VITE_CLASSROOM_LOCAL_DEV ?? "").toLowerCase() === "true"
+      || isFirebaseClassroomEnabled();
+    if (localClassroomEnabled) {
+      return "demo";
+    }
     return getConfiguredGameTransport();
   }
 
@@ -532,7 +539,7 @@ class GameSocketClient {
     this.requestWebsocketSync();
     this.websocketSyncIntervalId = window.setInterval(() => {
       this.requestWebsocketSync();
-    }, 250);
+    }, WEBSOCKET_SYNC_INTERVAL_MS);
   }
 
   private stopWebsocketSyncLoop() {
@@ -559,6 +566,7 @@ class GameSocketClient {
         playerId: state.playerId
       })
     });
+    recordWebsocketSyncPublish(Date.now());
   }
 
   private safeParse<T>(body: string): T | null {
@@ -571,3 +579,24 @@ class GameSocketClient {
 }
 
 export const gameSocket = new GameSocketClient();
+
+let websocketSyncWindowStartedAtMs = 0;
+let websocketSyncPublishCount = 0;
+
+function recordWebsocketSyncPublish(nowMs: number) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  if (websocketSyncWindowStartedAtMs <= 0) {
+    websocketSyncWindowStartedAtMs = nowMs;
+  }
+  websocketSyncPublishCount += 1;
+  if (nowMs - websocketSyncWindowStartedAtMs < 5000) {
+    return;
+  }
+
+  const seconds = (nowMs - websocketSyncWindowStartedAtMs) / 1000;
+  console.debug("[websocket-sync] publishes/sec", (websocketSyncPublishCount / seconds).toFixed(1));
+  websocketSyncWindowStartedAtMs = nowMs;
+  websocketSyncPublishCount = 0;
+}

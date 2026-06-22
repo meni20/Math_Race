@@ -8,6 +8,10 @@
   color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -24,6 +28,80 @@ body,
 body {
   font-family: "Inter", "Roboto", Arial, sans-serif;
   background: linear-gradient(145deg, #071a38 0%, #082342 42%, #020817 100%);
+}
+
+:root[data-theme="light"] body {
+  background: linear-gradient(145deg, #eef8fb 0%, #dcecf4 48%, #f8fafc 100%);
+}
+
+.theme-light-ui {
+  background: linear-gradient(145deg, #f8fafc 0%, #e6f4f8 48%, #dfeaf1 100%) !important;
+  color: #0f172a !important;
+}
+
+.theme-light-ui > .absolute.inset-0 {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.34), rgba(236, 254, 255, 0.18), rgba(255, 255, 255, 0.04)) !important;
+}
+
+.theme-light-ui [class*="bg-slate-950"],
+.theme-light-ui [class*="bg-slate-900"],
+.theme-light-ui [class*="bg-slate-800"] {
+  background-color: rgba(255, 255, 255, 0.84) !important;
+}
+
+.theme-light-ui [class*="bg-white/"],
+.theme-light-ui [class*="bg-white["],
+.theme-light-ui [class*="bg-cyan-300/"],
+.theme-light-ui [class*="bg-cyan-100/"] {
+  background-color: rgba(255, 255, 255, 0.58) !important;
+}
+
+.theme-light-ui [class*="border-white"],
+.theme-light-ui [class*="border-cyan"] {
+  border-color: rgba(8, 145, 178, 0.28) !important;
+}
+
+.theme-light-ui [class*="text-white"],
+.theme-light-ui [class*="text-slate-50"],
+.theme-light-ui [class*="text-slate-100"],
+.theme-light-ui [class*="text-cyan-50"],
+.theme-light-ui [class*="text-cyan-100"] {
+  color: #0f172a !important;
+}
+
+.theme-light-ui [class*="text-slate-200"],
+.theme-light-ui [class*="text-slate-300"],
+.theme-light-ui [class*="text-slate-400"] {
+  color: #334155 !important;
+}
+
+.theme-light-ui [class*="text-amber"],
+.theme-light-ui [class*="text-rose"] {
+  color: #7c2d12 !important;
+}
+
+.theme-light-ui input,
+.theme-light-ui select,
+.theme-light-ui textarea {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(8, 145, 178, 0.25) !important;
+  color: #0f172a !important;
+}
+
+.theme-light-ui input::placeholder,
+.theme-light-ui textarea::placeholder {
+  color: #64748b !important;
+}
+
+.theme-light-ui option {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.theme-light-ui .theme-toggle-button {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border-color: rgba(14, 116, 144, 0.36) !important;
+  color: #ecfeff !important;
 }
 
 h1,
@@ -44,4 +122,75 @@ h6 {
 .math-answer {
   direction: ltr;
   unicode-bidi: isolate;
+}
+
+.race-checkers {
+  background-image: linear-gradient(45deg, #111827 25%, transparent 25%),
+    linear-gradient(-45deg, #111827 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #111827 75%),
+    linear-gradient(-45deg, transparent 75%, #111827 75%);
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+}
+
+.race-podium-entry {
+  opacity: 0;
+  transform: translateX(45vw) scale(0.75);
+  animation: race-podium-arrive 0.65s cubic-bezier(0.2, 0.9, 0.25, 1.25) forwards;
+}
+
+.race-podium-entry--3 { animation-delay: 0.2s; }
+.race-podium-entry--2 { animation-delay: 0.85s; }
+.race-podium-entry--1 { animation-delay: 1.5s; }
+
+@keyframes race-podium-arrive {
+  70% { opacity: 1; transform: translateX(-1.5rem) scale(1.04); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.race-exhaust-bank {
+  position: fixed;
+  bottom: 4.5rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.race-exhaust-bank--left { left: 0.75rem; transform: rotate(14deg); }
+.race-exhaust-bank--right { right: 0.75rem; transform: rotate(-14deg); }
+
+.race-exhaust {
+  width: 0.65rem;
+  height: 2.7rem;
+  border: 3px solid #475569;
+  border-radius: 999px;
+  background: linear-gradient(#cbd5e1, #64748b);
+  box-shadow: inset 0 7px 0 #1e293b;
+}
+
+.race-confetti > i {
+  --confetti-drift: 0px;
+  position: fixed;
+  top: -1rem;
+  z-index: 120;
+  width: 0.55rem;
+  height: 0.9rem;
+  border-radius: 0.15rem;
+  opacity: 0;
+  pointer-events: none;
+  animation: race-confetti-fall 1.9s ease-out 1 forwards;
+}
+
+@keyframes race-confetti-fall {
+  0% { opacity: 1; transform: translate3d(0, -2vh, 0) rotate(0); }
+  100% { opacity: 0; transform: translate3d(var(--confetti-drift), 105vh, 0) rotate(620deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .race-podium-entry {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+  .race-confetti > i { display: none; }
 }

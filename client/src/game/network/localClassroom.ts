@@ -1,9 +1,15 @@
 import type { GameStateUpdateMessage, PlayerSnapshot, RacePhase, RoomSettings } from "../types/messages";
 import { normalizeCarId } from "../utils/carSelection";
 import { normalizeRoomSettings } from "../utils/roomSettings";
+import {
+  isFirebaseClassroomEnabled,
+  subscribeFirebaseClassroomRoom,
+  writeFirebaseClassroomRoom
+} from "./firebaseClassroom";
 
 export interface LocalClassroomRoom {
   roomId: string;
+  joinCode?: string;
   teacherSessionId?: string;
   devSessionId?: string;
   createdAtMs?: number;
@@ -79,9 +85,55 @@ export function listLocalClassroomRooms() {
   return rooms.sort((left, right) => left.roomId.localeCompare(right.roomId));
 }
 
-export function writeLocalClassroomRoom(room: LocalClassroomRoom) {
+interface LocalClassroomWriteOptions {
+  syncRemote?: boolean;
+}
+
+interface LocalClassroomUpdateOptions extends LocalClassroomWriteOptions {
+  persist?: boolean;
+}
+
+let localClassroomWriteWindowStartedAtMs = 0;
+let localClassroomWriteCount = 0;
+let firebaseClassroomWriteCount = 0;
+
+function recordLocalClassroomWrite(nowMs: number, syncRemote: boolean) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  if (localClassroomWriteWindowStartedAtMs <= 0) {
+    localClassroomWriteWindowStartedAtMs = nowMs;
+  }
+  localClassroomWriteCount += 1;
+  if (syncRemote) {
+    firebaseClassroomWriteCount += 1;
+  }
+  if (nowMs - localClassroomWriteWindowStartedAtMs < 5000) {
+    return;
+  }
+
+  const seconds = (nowMs - localClassroomWriteWindowStartedAtMs) / 1000;
+  console.debug("[local-classroom] writes/sec", {
+    local: (localClassroomWriteCount / seconds).toFixed(1),
+    firebase: (firebaseClassroomWriteCount / seconds).toFixed(1)
+  });
+  localClassroomWriteWindowStartedAtMs = nowMs;
+  localClassroomWriteCount = 0;
+  firebaseClassroomWriteCount = 0;
+}
+
+export function writeLocalClassroomRoom(room: LocalClassroomRoom, options: LocalClassroomWriteOptions = {}) {
+  const shouldSyncRemote = options.syncRemote !== false && isFirebaseClassroomEnabled();
   window.localStorage.setItem(keyForRoom(room.roomId), JSON.stringify(room));
   notify(room.roomId);
+  recordLocalClassroomWrite(Date.now(), shouldSyncRemote);
+  if (shouldSyncRemote) {
+    void writeFirebaseClassroomRoom(room).catch((error) => {
+      if (import.meta.env.DEV) {
+        console.warn("[firebase-classroom] write failed", error);
+      }
+    });
+  }
 }
 
 export function createLocalClassroomRoom(roomId: string, roomSettings: RoomSettings): LocalClassroomRoom {
@@ -112,7 +164,11 @@ export function createLocalClassroomRoom(roomId: string, roomSettings: RoomSetti
   return room;
 }
 
-export function updateLocalClassroomRoom(roomId: string, updater: (room: LocalClassroomRoom) => LocalClassroomRoom | null) {
+export function updateLocalClassroomRoom(
+  roomId: string,
+  updater: (room: LocalClassroomRoom) => LocalClassroomRoom | null,
+  options: LocalClassroomUpdateOptions = {}
+) {
   const current = readLocalClassroomRoom(roomId);
   if (!current) {
     return null;
@@ -122,8 +178,10 @@ export function updateLocalClassroomRoom(roomId: string, updater: (room: LocalCl
     return null;
   }
   next.tick += 1;
-  next.updatedAtMs = Date.now();
-  writeLocalClassroomRoom(next);
+  next.updatedAtMs = Math.max(Date.now(), (current.updatedAtMs ?? 0) + 1);
+  if (options.persist !== false) {
+    writeLocalClassroomRoom(next, options);
+  }
   return next;
 }
 
@@ -154,8 +212,9 @@ export function localRoomToStateUpdate(room: LocalClassroomRoom): GameStateUpdat
     trackLengthMeters: room.trackLengthMeters,
     players: Object.values(room.players)
       .sort((left, right) => {
-        if (left.lap !== right.lap) {
-          return right.lap - left.lap;
+        const scoreDelta = Math.max(0, Math.trunc(right.score ?? 0)) - Math.max(0, Math.trunc(left.score ?? 0));
+        if (scoreDelta !== 0) {
+          return scoreDelta;
         }
         if (left.positionMeters !== right.positionMeters) {
           return right.positionMeters - left.positionMeters;
@@ -173,6 +232,7 @@ export function localRoomToStateUpdate(room: LocalClassroomRoom): GameStateUpdat
 
 export function subscribeLocalClassroomRoom(roomId: string, listener: (room: LocalClassroomRoom) => void) {
   const channel = "BroadcastChannel" in window ? new BroadcastChannel(LOCAL_CLASSROOM_EVENT) : null;
+  let latestRemoteSnapshot = "";
   const handleChange = (event: Event) => {
     if (event instanceof StorageEvent && event.key !== keyForRoom(roomId)) {
       return;
@@ -197,10 +257,27 @@ export function subscribeLocalClassroomRoom(roomId: string, listener: (room: Loc
   window.addEventListener("storage", handleChange);
   window.addEventListener(LOCAL_CLASSROOM_EVENT, handleChange);
   channel?.addEventListener("message", handleBroadcast);
+  const unsubscribeRemote = isFirebaseClassroomEnabled()
+    ? subscribeFirebaseClassroomRoom(roomId, (room) => {
+      // Firestore snapshots for a document are already ordered. Comparing only
+      // updatedAtMs dropped valid player changes made within the same millisecond
+      // (and changes from another client whose local clock was behind).
+      const serializedRoom = JSON.stringify(room);
+      if (serializedRoom === latestRemoteSnapshot) {
+        return;
+      }
+      latestRemoteSnapshot = serializedRoom;
+      if (serializedRoom === JSON.stringify(readLocalClassroomRoom(roomId))) {
+        return;
+      }
+      writeLocalClassroomRoom(room, { syncRemote: false });
+    })
+    : null;
   return () => {
     window.removeEventListener("storage", handleChange);
     window.removeEventListener(LOCAL_CLASSROOM_EVENT, handleChange);
     channel?.removeEventListener("message", handleBroadcast);
     channel?.close();
+    unsubscribeRemote?.();
   };
 }

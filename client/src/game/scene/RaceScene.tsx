@@ -9,16 +9,12 @@ import { useGameStore } from "../store/useGameStore";
 import type { TrackTheme } from "../types/messages";
 import { DEFAULT_CAR_ID } from "../utils/carSelection";
 import {
-  CLASSROOM_FINISH_GATE_PROGRESS_RATIO,
-  getDistanceToFinishMeters,
-  getClassroomScoreProgressRatio,
   getClassroomVisualDriveMeters,
   getClassroomVisualTrackMeters,
   getPlayerProgressRatio,
-  isPlayerOnFinalLap,
-  shouldShowClassroomFinishGate
+  isPlayerOnFinalLap
 } from "../utils/renderMotion";
-import { getRenderedPlayersSnapshot, useRenderedPlayers } from "../utils/useRenderedPlayers";
+import { getRenderedPlayersSnapshot, useRenderedPlayersUi } from "../utils/useRenderedPlayers";
 import { GARAGE_CARS, getGarageCarById, type GarageCar } from "../utils/carCatalog";
 import { isSoloRoomId } from "../utils/gameIds";
 import { getSoloLocalCenteredLaneX } from "../utils/soloLane";
@@ -325,13 +321,6 @@ function getLobbyToTrackTransform(
 
 function isClassroomVisualMode(sessionMode: string, roomCreatorPlayerId: string) {
   return sessionMode === "shared" && roomCreatorPlayerId === "";
-}
-
-function normalizeClassroomTargetScore(targetScore: number | null | undefined) {
-  if (!Number.isFinite(targetScore ?? NaN)) {
-    return 300;
-  }
-  return Math.max(1, Math.trunc(targetScore ?? 300));
 }
 
 function getClassroomDriveZ(player: Parameters<typeof getClassroomVisualDriveMeters>[0]) {
@@ -1674,17 +1663,32 @@ function EnvironmentManager({ theme }: { theme: TrackTheme }) {
 }
 
 function ClassroomRepeatingWorld({ environment, theme }: { environment: EnvironmentConfig; theme: TrackTheme }) {
-  const { localPlayer } = useRenderedPlayers();
-  const driveZ = getClassroomDriveZ(localPlayer);
-  const baseZ = Math.round(driveZ / CLASSROOM_WORLD_REPEAT_Z) * CLASSROOM_WORLD_REPEAT_Z;
   const offsets = useMemo(() => [-2, -1, 0, 1, 2], []);
+  const groupRefs = useRef<Array<Group | null>>([]);
+
+  useFrame(() => {
+    const { localPlayer } = getRenderedPlayersSnapshot();
+    const driveZ = getClassroomDriveZ(localPlayer);
+    const baseZ = Math.round(driveZ / CLASSROOM_WORLD_REPEAT_Z) * CLASSROOM_WORLD_REPEAT_Z;
+    offsets.forEach((offset, index) => {
+      const group = groupRefs.current[index];
+      if (group) {
+        group.position.z = baseZ + offset * CLASSROOM_WORLD_REPEAT_Z;
+      }
+    });
+  });
 
   return (
     <>
-      {offsets.map((offset) => {
-        const z = baseZ + offset * CLASSROOM_WORLD_REPEAT_Z;
+      {offsets.map((offset, index) => {
         return (
-          <group key={`classroom-world-${theme}-${z}`} position={[0, 0, z]}>
+          <group
+            key={`classroom-world-${theme}-${offset}`}
+            ref={(group) => {
+              groupRefs.current[index] = group;
+            }}
+            position={[0, 0, offset * CLASSROOM_WORLD_REPEAT_Z]}
+          >
             <NeonTrack environment={environment} />
             <EnvironmentManager theme={theme} />
           </group>
@@ -1866,7 +1870,7 @@ function SideProgressMarkers({ environment }: { environment: EnvironmentConfig }
   const totalLaps = useGameStore((state) => state.totalLaps);
   const sessionMode = useGameStore((state) => state.sessionMode);
   const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
-  const { localPlayer } = useRenderedPlayers();
+  const { localPlayer } = useRenderedPlayersUi();
   const classroomVisualMode = isClassroomVisualMode(sessionMode, roomCreatorPlayerId);
   const markers = useMemo(
     () =>
@@ -1952,134 +1956,6 @@ function SideProgressMarkers({ environment }: { environment: EnvironmentConfig }
           </group>
         );
       })}
-    </group>
-  );
-}
-
-function FinishGate({ environment }: { environment: EnvironmentConfig }) {
-  const racePhase = useGameStore((state) => state.racePhase);
-  const trackLengthMeters = useGameStore((state) => state.trackLengthMeters);
-  const totalLaps = useGameStore((state) => state.totalLaps);
-  const sessionMode = useGameStore((state) => state.sessionMode);
-  const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
-  const targetScore = useGameStore((state) => state.roomSettings.targetScore);
-  const { localPlayer } = useRenderedPlayers();
-  const glowRef = useRef<PointLight>(null);
-  const finishTiles = useMemo(() => Array.from({ length: 12 }, (_, index) => index), []);
-  const classroomVisualMode = isClassroomVisualMode(sessionMode, roomCreatorPlayerId);
-
-  const progressRatio = classroomVisualMode
-    ? getClassroomScoreProgressRatio(localPlayer, normalizeClassroomTargetScore(targetScore))
-    : getPlayerProgressRatio(localPlayer, trackLengthMeters, totalLaps);
-  const raceFinished = Boolean(localPlayer && (localPlayer.finished || progressRatio >= 0.999));
-  const gateVisible = (racePhase === "active" || racePhase === "finish")
-    && (!classroomVisualMode || shouldShowClassroomFinishGate(progressRatio, raceFinished));
-  const distanceToFinishMeters = classroomVisualMode ? 0 : getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps);
-  const gateApproachFactor = classroomVisualMode
-    ? MathUtils.clamp(
-      (progressRatio - CLASSROOM_FINISH_GATE_PROGRESS_RATIO) / Math.max(0.01, 1 - CLASSROOM_FINISH_GATE_PROGRESS_RATIO),
-      0,
-      1
-    )
-    : MathUtils.clamp(1 - (distanceToFinishMeters / 260), 0, 1);
-  const finalLapActive = classroomVisualMode
-    ? progressRatio >= CLASSROOM_FINISH_GATE_PROGRESS_RATIO
-    : isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
-  const gateColor = raceFinished ? environment.progressFinish : finalLapActive ? environment.accent : environment.sideLane;
-  const supportColor = raceFinished ? environment.progressFinish : finalLapActive ? environment.accent : environment.lobbyBar;
-  const haloOpacity = raceFinished ? 0.12 : finalLapActive ? 0.08 + gateApproachFactor * 0.04 : 0.06 + gateApproachFactor * 0.02;
-  const gateZ = classroomVisualMode
-    ? getClassroomDriveZ(localPlayer) - MathUtils.lerp(58, 8, gateApproachFactor)
-    : -trackLengthMeters * TRACK_Z_SCALE;
-
-  useFrame(({ clock }) => {
-    if (!gateVisible || !glowRef.current) {
-      return;
-    }
-    const pulseSpeed = raceFinished
-      ? 4.2
-      : finalLapActive
-        ? 5.2 + gateApproachFactor
-        : 2.4 + gateApproachFactor * 1.2;
-    const pulse = 0.82 + Math.sin(clock.getElapsedTime() * pulseSpeed) * 0.22;
-    const baseIntensity = raceFinished
-      ? 1.2
-      : finalLapActive
-        ? 1.4 + gateApproachFactor * 0.4
-        : 0.9 + gateApproachFactor * 0.2;
-    glowRef.current.intensity = Math.max(0.1, baseIntensity * pulse);
-  });
-
-  if (!gateVisible) {
-    return null;
-  }
-
-  return (
-    <group>
-      <group position={[0, 0.03, gateZ + 1.45]}>
-        {finishTiles.map((tile) => (
-          <mesh key={`finish-tile-${tile}`} position={[-10.35 + tile * 1.88, 0, 0]} receiveShadow>
-            <boxGeometry args={[1.72, 0.02, 1.45]} />
-            <meshStandardMaterial
-              color={tile % 2 === 0 ? "#f8fafc" : "#0c1328"}
-              emissive={tile % 2 === 0 ? "#d7f7ff" : "#0c1328"}
-              emissiveIntensity={tile % 2 === 0 ? 0.1 : 0.2}
-            />
-          </mesh>
-        ))}
-      </group>
-
-      <group position={[0, 2.6, gateZ]}>
-        <mesh castShadow receiveShadow position={[-5.9, 0, 0]}>
-          <boxGeometry args={[0.55, 5.2, 0.55]} />
-          <meshStandardMaterial color="#0f1b38" emissive="#0f1b38" emissiveIntensity={0.35} />
-        </mesh>
-        <mesh castShadow receiveShadow position={[5.9, 0, 0]}>
-          <boxGeometry args={[0.55, 5.2, 0.55]} />
-          <meshStandardMaterial color="#0f1b38" emissive="#0f1b38" emissiveIntensity={0.35} />
-        </mesh>
-
-        <mesh castShadow receiveShadow position={[0, 2.4, 0]}>
-          <boxGeometry args={[12.8, 0.7, 0.62]} />
-          <meshStandardMaterial
-            color={gateColor}
-            emissive={gateColor}
-            emissiveIntensity={raceFinished ? 0.22 : finalLapActive ? 0.16 + gateApproachFactor * 0.08 : 0.12 + gateApproachFactor * 0.04}
-            metalness={0.35}
-          />
-        </mesh>
-        <mesh position={[0, 2.41, -0.12]}>
-          <boxGeometry args={[11.7, 0.18, 0.12]} />
-          <meshStandardMaterial
-            color={supportColor}
-            emissive={supportColor}
-            emissiveIntensity={raceFinished ? 0.32 : finalLapActive ? 0.24 + gateApproachFactor * 0.12 : 0.2}
-          />
-        </mesh>
-
-        <mesh position={[-5.9, 2.7, 0]}>
-          <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial
-            color={supportColor}
-            emissive={supportColor}
-            emissiveIntensity={raceFinished ? 0.42 : finalLapActive ? 0.34 + gateApproachFactor * 0.12 : 0.28}
-          />
-        </mesh>
-        <mesh position={[5.9, 2.7, 0]}>
-          <sphereGeometry args={[0.2, 16, 16]} />
-          <meshStandardMaterial
-            color={supportColor}
-            emissive={supportColor}
-            emissiveIntensity={raceFinished ? 0.42 : finalLapActive ? 0.34 + gateApproachFactor * 0.12 : 0.28}
-          />
-        </mesh>
-
-        <mesh position={[0, -2.56, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[4.9, 7.5, 52]} />
-          <meshBasicMaterial color={gateColor} transparent opacity={haloOpacity} />
-        </mesh>
-        <pointLight ref={glowRef} color={gateColor} distance={18} position={[0, 1.95, 0]} />
-      </group>
     </group>
   );
 }
@@ -2268,7 +2144,6 @@ export function RaceScene() {
       <StadiumAtmosphereAudio />
       <LobbyBay environment={environment} />
       <SideProgressMarkers environment={environment} />
-      <FinishGate environment={environment} />
       <Suspense fallback={null}>
         <CarsLayer />
       </Suspense>

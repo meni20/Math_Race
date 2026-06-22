@@ -47,6 +47,7 @@ public class GameStateServiceTest {
                 "q-" + difficulty + "-" + System.nanoTime(),
                 "1 + 1",
                 "2",
+                java.util.List.of("1", "2", "3", "4"),
                 difficulty,
                 5000,
                 1.0
@@ -229,7 +230,7 @@ public class GameStateServiceTest {
         synchronized (room.getLock()) {
             room.setRoomSettings(new RoomSettings("Short Race", 4, 1, 5));
             room.setRacePhase("active");
-            room.setRaceStartedAtMs(now - 2000L);
+            room.setRaceStartedAtMs(now - 61_000L);
             room.setLastInteractionAtMs(now - 1500L);
             PlayerState human = room.getPlayers().get("p-1");
             PlayerState bot = room.getPlayers().get("p-1-ai-1");

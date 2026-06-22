@@ -6,7 +6,7 @@ import {
   getPlayerRaceDistanceMeters,
   isPlayerOnFinalLap
 } from "../game/utils/renderMotion";
-import { useRenderedPlayers } from "../game/utils/useRenderedPlayers";
+import { useRenderedPlayersUi } from "../game/utils/useRenderedPlayers";
 
 function toKmh(speedMps: number) {
   return Math.round(speedMps * 3.6);
@@ -88,7 +88,7 @@ export function Hud() {
   const selectedCarId = useGameStore((state) => state.selectedCarId);
   const sessionMode = useGameStore((state) => state.sessionMode);
   const roomCreatorPlayerId = useGameStore((state) => state.roomCreatorPlayerId);
-  const { nowMs, playerIds, players, localPlayer } = useRenderedPlayers();
+  const { nowMs, playerIds, players, localPlayer } = useRenderedPlayersUi();
   const localCar = getCarMetadata(localPlayer?.carId ?? selectedCarId);
   const localSpeedKmh = localPlayer ? toKmh(localPlayer.speedMps) : 0;
   const localScore = Math.max(0, Math.trunc(localPlayer?.score ?? 0));
@@ -97,12 +97,12 @@ export function Hud() {
   const raceElapsedMs = !isClassroomSession && raceStartedAtMs
     ? Math.max(0, (raceFinishedAtMs ?? nowMs) - raceStartedAtMs)
     : 0;
-  const distanceToFinishGateMeters = !isClassroomSession
+  const distanceToFinishMeters = !isClassroomSession
     ? getDistanceToFinishMeters(localPlayer, trackLengthMeters, totalLaps)
     : 0;
   const lapsRemainingToFinish = !isClassroomSession
     ? localPlayer
-      ? Math.max(0, Math.ceil(distanceToFinishGateMeters / Math.max(1, trackLengthMeters)) - 1)
+      ? Math.max(0, Math.ceil(distanceToFinishMeters / Math.max(1, trackLengthMeters)) - 1)
       : Math.max(0, totalLaps - 1)
     : 0;
   const finalLapActive = !isClassroomSession && isPlayerOnFinalLap(localPlayer, trackLengthMeters, totalLaps);
@@ -196,9 +196,9 @@ export function Hud() {
           ) : (
             <p className="mt-1 text-amber-100/90">
               {localPlayer?.finished
-                ? "חצית את שער הסיום"
+                ? "הגעת ליעד הניקוד"
                 : finalLapActive
-                  ? `סיום: ${formatDistance(distanceToFinishGateMeters)}`
+                  ? `סיום: ${formatDistance(distanceToFinishMeters)}`
                   : `נפתח בעוד ${lapsRemainingToFinish} הקפות`}
             </p>
           )}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "./auth";
+import { AdminDashboardHome } from "./components/AdminDashboardHome";
 import { AuthPage } from "./components/AuthPage";
 import { DecisionOverlay } from "./components/DecisionOverlay";
 import { FinishOverlay } from "./components/FinishOverlay";
@@ -7,16 +8,19 @@ import { Hud } from "./components/Hud";
 import { LanguageToggle } from "./components/LanguageToggle";
 import { LobbyPanel } from "./components/LobbyPanel";
 import { QuestionOverlay } from "./components/QuestionOverlay";
+import { RaceResultsPage } from "./components/RaceResultsPage";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { TeacherDashboard } from "./components/teacher/TeacherDashboard";
-import { UserAccountPanel } from "./components/UserAccountPanel";
 import { getClassroomAdapterInfo, getClassroomRoomService } from "./game/network/classroomRooms";
 import { gameSocket } from "./game/network/gameSocket";
+import { navigateToRaceResults, saveRaceResults } from "./game/results/raceResults";
 import { getConfiguredGameTransport } from "./game/network/transportConfig";
 import { MenuScene, RaceScene } from "./game/scene/RaceScene";
 import { useGameStore } from "./game/store/useGameStore";
 import { normalizePlayerId, normalizeRoomId } from "./game/utils/gameIds";
-import { useRenderedPlayers } from "./game/utils/useRenderedPlayers";
+import { useRenderedPlayersUi } from "./game/utils/useRenderedPlayers";
 import { useLanguage } from "./i18n";
+import { useTheme } from "./theme";
 
 function parseBoolean(value: string | null) {
   if (!value) {
@@ -30,7 +34,7 @@ function DebugOverlay() {
   const roomId = useGameStore((state) => state.roomId);
   const playerId = useGameStore((state) => state.playerId);
   const racePhase = useGameStore((state) => state.racePhase);
-  const { playerIds, localPlayer } = useRenderedPlayers();
+  const { playerIds, localPlayer } = useRenderedPlayersUi();
 
   return (
     <section className="pointer-events-none absolute right-4 top-4 z-30 rounded-xl border border-lime-300/45 bg-slate-950/78 px-3 py-2 text-xs text-lime-100 backdrop-blur">
@@ -50,12 +54,18 @@ function DebugOverlay() {
 function App() {
   const autoJoinAttemptedRef = useRef(false);
   const { direction, language } = useLanguage();
+  const { theme } = useTheme();
   const { user, loading: authLoading, canAccessTeacher } = useAuth();
   const [locationKey, setLocationKey] = useState(() => `${window.location.pathname}${window.location.search}${window.location.hash}`);
   const prepareJoin = useGameStore((state) => state.prepareJoin);
   const connection = useGameStore((state) => state.connection);
   const racePhase = useGameStore((state) => state.racePhase);
   const raceStopped = useGameStore((state) => state.raceStopped);
+  const roomId = useGameStore((state) => state.roomId);
+  const players = useGameStore((state) => state.players);
+  const roomSettings = useGameStore((state) => state.roomSettings);
+  const raceStartedAtMs = useGameStore((state) => state.raceStartedAtMs);
+  const raceFinishedAtMs = useGameStore((state) => state.raceFinishedAtMs);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -79,7 +89,7 @@ function App() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    if (isTeacherRoute(window.location.pathname, params) || isAuthRoute(window.location.pathname)) {
+    if (isTeacherRoute(window.location.pathname, params) || isAuthRoute(window.location.pathname) || getResultsSessionId(window.location.pathname)) {
       return;
     }
     if (!parseBoolean(params.get("autojoin"))) {
@@ -98,7 +108,11 @@ function App() {
       return;
     }
 
-    const roomId = normalizeRoomId(params.get("room")?.trim() || "arena-1");
+    const requestedRoomId = params.get("room")?.trim();
+    if (!requestedRoomId) {
+      return;
+    }
+    const roomId = normalizeRoomId(requestedRoomId);
     const persistedSession = gameSocket.getPersistedWebsocketSession();
     const canResumePersisted = persistedSession?.roomId === roomId;
     const displayName = params.get("name")?.trim() || (canResumePersisted ? persistedSession.displayName : "נהג בדיקה");
@@ -144,7 +158,26 @@ function App() {
     void runAutoJoin();
   }, [locationKey, prepareJoin]);
 
+  useEffect(() => {
+    const finished = racePhase === "finish" || raceStopped;
+    const finalPlayers = Object.values(players);
+    if (!finished || !roomId || finalPlayers.length === 0 || getResultsSessionId(window.location.pathname)) {
+      return;
+    }
+    const saved = saveRaceResults({
+      sessionId: roomId,
+      roomSettings,
+      raceStartedAtMs,
+      raceFinishedAtMs: raceFinishedAtMs ?? Date.now(),
+      players: finalPlayers
+    });
+    if (saved) {
+      navigateToRaceResults(roomId);
+    }
+  }, [players, raceFinishedAtMs, racePhase, raceStartedAtMs, raceStopped, roomId, roomSettings]);
+
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const resultsSessionId = getResultsSessionId(pathname);
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const authRoute = isAuthRoute(pathname);
   const teacherRoute = isTeacherRoute(pathname, params);
@@ -156,25 +189,50 @@ function App() {
   const showResults = racePhase === "finish" || raceStopped;
   const showPermissionDenied = teacherRoute && !authLoading && Boolean(user) && !canAccessTeacher;
   const showAuthPage = authRoute || (teacherRoute && !authLoading && !user);
+  const showAdminHome = user?.role === "admin"
+    && !teacherRoute
+    && !parseBoolean(params.get("adminGame"))
+    && !showAuthPage
+    && !showPermissionDenied
+    && showMenuScene;
+  const showLandingLanguageToggle = showMenuScene && !showAdminHome && !showTeacherDashboard && !showAuthPage && !showPermissionDenied;
+  const showThemeToggle = !showTeacherDashboard
+    && !showAdminHome
+    && !showResults
+    && racePhase !== "active"
+    && racePhase !== "starting"
+    && (showMenuScene || showAuthPage || showPermissionDenied || racePhase === "lobby");
+  const lightUiClass = theme === "light" && showThemeToggle ? "theme-light-ui" : "";
+
+  if (resultsSessionId) {
+    return <RaceResultsPage sessionId={resultsSessionId} />;
+  }
 
   return (
-    <main dir={direction} lang={language} className="relative h-screen w-screen overflow-hidden bg-[linear-gradient(145deg,#071a38_0%,#082342_42%,#020817_100%)] text-slate-100">
+    <main dir={direction} lang={language} className={`relative h-screen w-screen overflow-hidden bg-[linear-gradient(145deg,#071a38_0%,#082342_42%,#020817_100%)] text-slate-100 ${lightUiClass}`}>
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,8,23,0.58)_0%,rgba(2,8,23,0.34)_28%,rgba(2,8,23,0)_62%),linear-gradient(180deg,rgba(148,203,213,0.05),rgba(2,8,23,0.18))]" />
-      <div className="pointer-events-auto absolute left-3 top-3 z-[70] flex items-start gap-2">
+      {showLandingLanguageToggle ? (
+      <div className="pointer-events-auto absolute right-5 top-28 z-[70] flex items-start gap-2">
         <LanguageToggle />
-        {showAuthPage ? null : <UserAccountPanel />}
       </div>
+      ) : null}
+      {showThemeToggle ? (
+        <div className="pointer-events-auto fixed bottom-5 right-5 z-[90]">
+          <ThemeToggle />
+        </div>
+      ) : null}
       {showAuthPage ? <AuthPage /> : null}
       {showPermissionDenied ? <PermissionDenied /> : null}
       {showAuthPage || showPermissionDenied ? null : (
         <>
-      {showTeacherDashboard ? null : (showMenuScene ? <MenuScene /> : <RaceScene />)}
-      {showTeacherDashboard || showResults ? null : <LobbyPanel />}
-      {showTeacherDashboard || showResults ? null : <Hud />}
-      {showTeacherDashboard || showResults ? null : <QuestionOverlay />}
-      {showTeacherDashboard || showResults ? null : <DecisionOverlay />}
-      {showTeacherDashboard ? null : <FinishOverlay />}
-      {showTeacherDashboard ? null : (showDebugOverlay ? <DebugOverlay /> : null)}
+      {showAdminHome ? <AdminDashboardHome /> : null}
+      {showAdminHome ? null : (showMenuScene ? <MenuScene /> : <RaceScene />)}
+      {showAdminHome || showTeacherDashboard || showResults ? null : <LobbyPanel />}
+      {showAdminHome || showTeacherDashboard || showResults ? null : <Hud />}
+      {showAdminHome || showTeacherDashboard || showResults ? null : <QuestionOverlay />}
+      {showAdminHome || showTeacherDashboard || showResults ? null : <DecisionOverlay />}
+      {showAdminHome || showTeacherDashboard ? null : <FinishOverlay />}
+      {showAdminHome || showTeacherDashboard ? null : (showDebugOverlay ? <DebugOverlay /> : null)}
       {showTeacherDashboard ? <TeacherDashboard /> : null}
         </>
       )}
@@ -184,6 +242,18 @@ function App() {
 
 function isAuthRoute(pathname: string) {
   return pathname === "/login" || pathname === "/auth";
+}
+
+function getResultsSessionId(pathname: string) {
+  const match = pathname.match(/^\/race-results\/([^/]+)\/?$/);
+  if (!match) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 function isTeacherRoute(pathname: string, params: URLSearchParams) {

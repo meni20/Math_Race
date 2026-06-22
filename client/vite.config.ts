@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   assetsInclude: ["**/*.glb"],
+  build: {
+    outDir: process.env.VERCEL === "1" ? "dist" : "../public",
+    emptyOutDir: true
+  },
   define: {
     global: "globalThis"
   },
