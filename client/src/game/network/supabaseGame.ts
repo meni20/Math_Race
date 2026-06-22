@@ -624,7 +624,9 @@ export class SupabaseGameClient {
         averageAnswerTimeMs: Math.max(0, Math.trunc(player.averageAnswerTimeMs ?? 0)),
         connected: player.connected !== false,
         disconnectedAtMs: Math.max(0, Math.trunc(player.disconnectedAtMs ?? 0)),
-        routeMode: player.routeMode
+        routeMode: player.routeMode,
+        routeStats: player.routeStats,
+        maxSpeedMps: player.maxSpeedMps
       }));
 
     return {

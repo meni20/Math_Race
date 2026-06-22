@@ -172,7 +172,7 @@ function Track({
   const boundedProgress = clampProgress(progress);
 
   return (
-    <div className="relative h-9 min-w-0">
+    <div dir="ltr" className="relative h-9 min-w-0">
       <span className={`absolute left-0 top-1/2 z-10 h-8 w-0.5 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-600" : "bg-emerald-200"}`} />
       <span className={`absolute right-0 top-1/2 z-10 h-8 w-0.5 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-600" : "bg-rose-200"}`} />
       <span className={`absolute left-1 top-0 text-[8px] font-black uppercase tracking-[0.12em] ${inactive ? "text-slate-600" : "text-emerald-100/85"}`}>{labels.start}</span>

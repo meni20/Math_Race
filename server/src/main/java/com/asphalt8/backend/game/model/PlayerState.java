@@ -1,5 +1,8 @@
 package com.asphalt8.backend.game.model;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class PlayerState {
 
     private final String playerId;
@@ -20,6 +23,9 @@ public class PlayerState {
     private boolean highwayChallengeActive;
     private String racePhase;
     private long lastSeenAtMs;
+    private String routeMode;
+    private final HashMap<String, Integer> routeStats;
+    private double maxSpeedMps;
 
     public PlayerState(String playerId, String displayName, int laneIndex, double baseSpeedMps) {
         this(playerId, displayName, laneIndex, baseSpeedMps, "bmw-m3");
@@ -42,6 +48,9 @@ public class PlayerState {
         this.highwayChallengeActive = false;
         this.racePhase = "lobby";
         this.lastSeenAtMs = System.currentTimeMillis();
+        this.routeMode = "NORMAL";
+        this.routeStats = new HashMap<>();
+        this.maxSpeedMps = baseSpeedMps;
     }
 
     public String getPlayerId() {
@@ -86,6 +95,7 @@ public class PlayerState {
 
     public void setSpeedMps(double speedMps) {
         this.speedMps = speedMps;
+        this.maxSpeedMps = Math.max(this.maxSpeedMps, speedMps);
     }
 
     public double getBaseSpeedMps() {
@@ -182,5 +192,33 @@ public class PlayerState {
 
     public void setLastSeenAtMs(long lastSeenAtMs) {
         this.lastSeenAtMs = lastSeenAtMs;
+    }
+
+    public String getRouteMode() {
+        return routeMode;
+    }
+
+    public void setRouteMode(String routeMode) {
+        this.routeMode = routeMode == null || routeMode.isBlank() ? "NORMAL" : routeMode;
+    }
+
+    public Map<String, Integer> getRouteStats() {
+        return Map.copyOf(routeStats);
+    }
+
+    public void recordRoute(String route) {
+        String normalized = route == null || route.isBlank() ? "NORMAL" : route;
+        routeStats.merge(normalized, 1, Integer::sum);
+        routeMode = normalized;
+    }
+
+    public double getMaxSpeedMps() {
+        return maxSpeedMps;
+    }
+
+    public void resetRaceTelemetry() {
+        routeMode = "NORMAL";
+        routeStats.clear();
+        maxSpeedMps = Math.max(0D, speedMps);
     }
 }

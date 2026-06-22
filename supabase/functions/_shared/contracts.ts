@@ -109,6 +109,8 @@ export interface PlayerSnapshot {
   routeMode?: string;
   streak?: number;
   averageAnswerTimeMs?: number;
+  routeStats?: Record<string, number>;
+  maxSpeedMps?: number;
 }
 
 export interface GameStateUpdateMessage {
@@ -239,6 +241,8 @@ export interface PlayerStateRecord {
   score?: number;
   totalAnswerTimeMs: number;
   answerCount: number;
+  routeStats?: Record<string, number>;
+  maxSpeedMps?: number;
   pendingQuestion: PendingQuestionRecord | null;
   pendingDecisionPoint: DecisionPointRecord | null;
   questionState?: PlayerQuestionState | null;

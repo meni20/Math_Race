@@ -97,6 +97,8 @@ export interface PlayerSnapshot {
   routeMode?: string;
   streak?: number;
   averageAnswerTimeMs?: number;
+  routeStats?: Record<string, number>;
+  maxSpeedMps?: number;
 }
 
 export interface GameStateUpdateMessage {

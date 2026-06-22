@@ -31,6 +31,25 @@ function routeLabel(routeMode: string) {
   return routeMode.trim() || "מסלול רגיל";
 }
 
+function usedRoute(player: RaceResultPlayer, route: string) {
+  return (player.routeStats?.[route] ?? 0) > 0 || player.routeMode.toUpperCase().includes(route === "DIRT_ROAD" ? "DIRT" : route);
+}
+
+function primaryRoute(player: RaceResultPlayer) {
+  const rankedRoutes = Object.entries(player.routeStats ?? {}).sort((left, right) => right[1] - left[1]);
+  return rankedRoutes[0]?.[0] ?? player.routeMode;
+}
+
+function formatRaceDuration(milliseconds: number | null) {
+  if (!milliseconds) return "—";
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
+}
+
+function formatSpeed(metersPerSecond: number | null) {
+  return metersPerSecond === null ? "—" : `${(metersPerSecond * 3.6).toFixed(1)} קמ״ש`;
+}
+
 function ExhaustConfetti() {
   const particles = useMemo(() => Array.from({ length: 42 }, (_, index) => ({
     id: index,
@@ -74,7 +93,7 @@ function PodiumCard({ player, index }: { player: RaceResultPlayer; index: number
         <div className="mt-2 flex flex-wrap justify-center gap-1 text-[11px] font-bold text-slate-600">
           <span className="rounded-full bg-white/75 px-2 py-1">{formatTime(player.averageAnswerTimeMs)}</span>
           <span className="rounded-full bg-white/75 px-2 py-1">{playerAccuracy === null ? "אין דיוק" : `${playerAccuracy}% דיוק`}</span>
-          <span className="rounded-full bg-white/75 px-2 py-1">{routeLabel(player.routeMode)}</span>
+          <span className="rounded-full bg-white/75 px-2 py-1">{routeLabel(primaryRoute(player))}</span>
         </div>
       </div>
       <div className={`${meta.height} flex items-start justify-center rounded-t-3xl bg-gradient-to-b ${meta.tone} pt-4 shadow-[0_16px_35px_rgba(30,41,59,0.2)]`}>
@@ -90,8 +109,8 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
   const fastest = players.filter((player) => player.averageAnswerTimeMs !== null)
     .sort((a, b) => (a.averageAnswerTimeMs ?? Infinity) - (b.averageAnswerTimeMs ?? Infinity))[0];
   const perfect = players.filter((player) => accuracy(player) === 100);
-  const highway = players.filter((player) => player.routeMode.toUpperCase().includes("HIGHWAY"));
-  const dirt = players.filter((player) => player.routeMode.toUpperCase().includes("DIRT"));
+  const highway = players.filter((player) => usedRoute(player, "HIGHWAY"));
+  const dirt = players.filter((player) => usedRoute(player, "DIRT_ROAD"));
   const isWinner = Boolean(results?.viewerPlayerId && results.viewerPlayerId === results.winnerPlayerId);
 
   return (
@@ -107,6 +126,7 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
           <h1 className="mt-2 text-4xl font-black text-slate-950 md:text-6xl">{isWinner ? "ניצחת במרוץ!" : "המרוץ הסתיים"}</h1>
           <p className="mt-2 text-lg font-black text-indigo-700">תוצאות המרוץ</p>
           <p className="mt-2 text-base font-bold text-slate-600">{results?.raceName ?? "מרוץ מתמטיקה"}</p>
+          {results?.mapId ? <p className="mt-1 text-sm font-bold text-slate-500">מפת מרוץ: {results.mapId}</p> : null}
         </header>
 
         {players.length === 0 ? (
@@ -143,6 +163,38 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
             </aside>
           </div>
         )}
+
+        {players.length ? (
+          <section className="mt-8 overflow-x-auto rounded-3xl border border-indigo-100 bg-white/90 p-5 shadow-xl shadow-indigo-100/60">
+            <h2 className="text-xl font-black text-slate-950">סיכום מלא</h2>
+            <table className="mt-4 w-full min-w-[52rem] text-right text-sm">
+              <thead className="text-xs font-black text-indigo-600">
+                <tr>
+                  <th className="pb-3">דירוג</th><th className="pb-3">משתתף</th><th className="pb-3">ניקוד</th>
+                  <th className="pb-3">זמן מרוץ</th><th className="pb-3">מרחק</th><th className="pb-3">מהירות ממוצעת</th>
+                  <th className="pb-3">מהירות מרבית</th><th className="pb-3">מסלולים</th>
+                </tr>
+              </thead>
+              <tbody>
+                {players.map((player, index) => {
+                  const routes = Object.entries(player.routeStats ?? {}).filter(([, count]) => count > 0);
+                  return (
+                    <tr key={player.playerId} className="border-t border-slate-100 font-semibold text-slate-700">
+                      <td className="py-3 font-black text-indigo-600">{index + 1}</td>
+                      <td className="py-3 font-black text-slate-950">{player.name}</td>
+                      <td className="py-3">{player.score}</td>
+                      <td className="py-3">{formatRaceDuration(player.totalRaceTimeMs)}</td>
+                      <td className="py-3">{Math.round(player.totalDistanceMeters)} מ׳</td>
+                      <td className="py-3">{formatSpeed(player.averageSpeedMps)}</td>
+                      <td className="py-3">{formatSpeed(player.maxSpeedMps)}</td>
+                      <td className="py-3">{routes.length ? routes.map(([route, count]) => `${routeLabel(route)} (${count})`).join(" · ") : routeLabel(player.routeMode)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        ) : null}
 
         {players.length > 3 ? (
           <div className="mt-8 overflow-hidden rounded-3xl border border-indigo-100 bg-white/90 shadow-xl shadow-indigo-100/60">

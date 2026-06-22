@@ -12,12 +12,18 @@ export interface RaceResultPlayer {
   timeoutAnswers: number;
   averageAnswerTimeMs: number | null;
   routeMode: string;
+  routeStats: Record<string, number>;
+  totalDistanceMeters: number;
+  totalRaceTimeMs: number | null;
+  averageSpeedMps: number | null;
+  maxSpeedMps: number | null;
   sourceOrder: number;
 }
 
 export interface RaceResultsSnapshot {
   sessionId: string;
   raceName: string;
+  mapId: string;
   raceStartedAtMs: number;
   raceFinishedAtMs: number;
   winnerPlayerId: string;
@@ -28,7 +34,7 @@ export interface RaceResultsSnapshot {
 
 export interface SaveRaceResultsInput {
   sessionId: string;
-  roomSettings?: Pick<RoomSettings, "raceName">;
+  roomSettings?: Pick<RoomSettings, "raceName" | "mapId">;
   raceStartedAtMs?: number;
   raceFinishedAtMs?: number;
   winnerPlayerId?: string | null;
@@ -42,10 +48,16 @@ function safeCount(value: number | undefined) {
 
 function normalizePlayer(
   player: SaveRaceResultsInput["players"][number],
-  sourceOrder: number
+  sourceOrder: number,
+  raceStartedAtMs: number,
+  raceFinishedAtMs: number
 ): RaceResultPlayer {
   const averageAnswerTimeMs = Number.isFinite(player.averageAnswerTimeMs) && (player.averageAnswerTimeMs ?? 0) > 0
     ? Math.max(1, Math.trunc(player.averageAnswerTimeMs ?? 0))
+    : null;
+  const totalDistanceMeters = Math.max(0, player.positionMeters ?? player.score ?? 0);
+  const totalRaceTimeMs = raceStartedAtMs > 0 && raceFinishedAtMs >= raceStartedAtMs
+    ? raceFinishedAtMs - raceStartedAtMs
     : null;
   return {
     playerId: player.playerId,
@@ -56,6 +68,11 @@ function normalizePlayer(
     timeoutAnswers: safeCount(player.timeoutAnswers),
     averageAnswerTimeMs,
     routeMode: typeof player.routeMode === "string" ? player.routeMode : "",
+    routeStats: Object.fromEntries(Object.entries(player.routeStats ?? {}).map(([route, count]) => [route, safeCount(count)])),
+    totalDistanceMeters,
+    totalRaceTimeMs,
+    averageSpeedMps: totalRaceTimeMs ? totalDistanceMeters / (totalRaceTimeMs / 1000) : null,
+    maxSpeedMps: Number.isFinite(player.maxSpeedMps) ? Math.max(0, player.maxSpeedMps ?? 0) : null,
     sourceOrder
   };
 }
@@ -81,12 +98,18 @@ export function saveRaceResults(input: SaveRaceResultsInput) {
   const snapshot: RaceResultsSnapshot = {
     sessionId: input.sessionId,
     raceName: input.roomSettings?.raceName?.trim() || "מרוץ מתמטיקה",
+    mapId: input.roomSettings?.mapId ?? "",
     raceStartedAtMs: Math.max(0, input.raceStartedAtMs ?? 0),
     raceFinishedAtMs: Math.max(0, input.raceFinishedAtMs ?? Date.now()),
     winnerPlayerId: input.winnerPlayerId?.trim() || "",
     viewerPlayerId: input.viewerPlayerId?.trim() || "",
     savedAtMs: Date.now(),
-    players: rankRaceResults(input.players.map(normalizePlayer))
+    players: rankRaceResults(input.players.map((player, index) => normalizePlayer(
+      player,
+      index,
+      Math.max(0, input.raceStartedAtMs ?? 0),
+      Math.max(0, input.raceFinishedAtMs ?? Date.now())
+    )))
   };
   window.localStorage.setItem(`${RESULTS_KEY_PREFIX}${input.sessionId}`, JSON.stringify(snapshot));
   return snapshot;
@@ -105,7 +128,16 @@ export function loadRaceResults(sessionId: string): RaceResultsSnapshot | null {
           ...parsed,
           winnerPlayerId: parsed.winnerPlayerId ?? "",
           viewerPlayerId: parsed.viewerPlayerId ?? "",
-          players: rankRaceResults(parsed.players)
+          mapId: parsed.mapId ?? "",
+          players: rankRaceResults(parsed.players.map((player, index) => ({
+            ...player,
+            routeStats: player.routeStats ?? {},
+            totalDistanceMeters: Math.max(0, player.totalDistanceMeters ?? player.score ?? 0),
+            totalRaceTimeMs: player.totalRaceTimeMs ?? null,
+            averageSpeedMps: player.averageSpeedMps ?? null,
+            maxSpeedMps: player.maxSpeedMps ?? null,
+            sourceOrder: Number.isFinite(player.sourceOrder) ? player.sourceOrder : index
+          })))
         };
       }
     } catch {

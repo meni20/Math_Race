@@ -313,7 +313,9 @@ public class GameStateService {
                 player.setSpeedMps(Math.max(MIN_SPEED_MPS, player.getSpeedMps() - WRONG_ANSWER_SPEED_PENALTY_MPS));
             }
 
+            player.recordRoute(pending.isFromHighwayChallenge() ? "HIGHWAY" : player.getRouteMode());
             player.setPendingQuestion(null);
+            player.setRouteMode("NORMAL");
 
             DecisionPointMessage decisionPoint = null;
             if (correct && shouldOfferDecision(player, now)) {
@@ -378,9 +380,11 @@ public class GameStateService {
             String choice = request.choice() == null ? "" : request.choice().trim().toUpperCase();
             if ("HIGHWAY".equals(choice)) {
                 player.setHighwayChallengeActive(true);
+                player.setRouteMode("HIGHWAY");
                 issueNewQuestion(room, player, 3, true, now);
             } else if ("DIRT".equals(choice)) {
                 player.setHighwayChallengeActive(false);
+                player.setRouteMode("DIRT_ROAD");
                 applyBoost(player, 0.60, 1600L, now);
                 issueNewQuestion(room, player, Math.max(1, calculateDifficulty(player, true) - 1), false, now);
             } else {
@@ -993,6 +997,7 @@ public class GameStateService {
         player.setDecisionCooldownUntilMs(0L);
         player.setHighwayChallengeActive(false);
         player.setRacePhase(PHASE_LOBBY);
+        player.resetRaceTelemetry();
     }
 
     private void resetRoomForNewRace(GameRoomState room, long now) {
@@ -1110,7 +1115,10 @@ public class GameStateService {
                     safeLap,
                     player.isFinished(),
                     normalizeStoredPlayerRacePhase(player, room),
-                    normalizeCarId(player.getCarId())
+                    normalizeCarId(player.getCarId()),
+                    player.getRouteMode(),
+                    player.getRouteStats(),
+                    round(player.getMaxSpeedMps())
                 );
             })
             .toList();

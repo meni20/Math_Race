@@ -33,6 +33,8 @@ export interface TeacherPlayerView {
   connected?: boolean;
   streak?: number;
   averageAnswerTimeMs?: number;
+  routeStats?: Record<string, number>;
+  maxSpeedMps?: number;
 }
 
 export interface TeacherEvent {

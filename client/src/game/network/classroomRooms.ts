@@ -9,6 +9,7 @@ import {
   writeLocalClassroomRoom,
   type LocalClassroomRoom
 } from "./localClassroom";
+import { finishLocalClassroomRoom } from "./classroomLifecycle";
 import { isFirebaseClassroomEnabled, listFirebaseClassroomRooms, readFirebaseClassroomRoom } from "./firebaseClassroom";
 import { getSupabaseTransportConfig } from "./transportConfig";
 import type { GameStateUpdateMessage, RoomSettings } from "../types/messages";
@@ -535,23 +536,7 @@ class LocalDevClassroomRoomService implements ClassroomRoomService {
 
   async endRoom(roomCode: string) {
     const now = Date.now();
-    const room = updateLocalClassroomRoom(roomCode, (current) => ({
-      ...current,
-      racePhase: "finish",
-      raceStopped: true,
-      raceStoppedAtMs: now,
-      endedAtMs: now,
-      isListed: false,
-      isLocked: true,
-      players: Object.fromEntries(Object.values(current.players).map((player) => [
-        player.playerId,
-        {
-          ...player,
-          racePhase: "finish",
-          speedMps: 0
-        }
-      ]))
-    }));
+    const room = updateLocalClassroomRoom(roomCode, (current) => finishLocalClassroomRoom(current, now));
     return { stateUpdate: room ? localRoomToStateUpdate(room) : undefined };
   }
 

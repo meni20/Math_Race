@@ -344,7 +344,7 @@ export class TeacherGameClient {
     throw new Error(adapter.message);
   }
 
-  async returnToLobby() {
+  async endRace() {
     const roomId = this.latestSnapshot?.roomId;
     if (!roomId) {
       return;

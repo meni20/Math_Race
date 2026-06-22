@@ -611,6 +611,8 @@ function resetPlayerForNewRace(player: PlayerStateRecord) {
   player.score = player.score ?? 0;
   player.totalAnswerTimeMs = player.totalAnswerTimeMs ?? 0;
   player.answerCount = player.answerCount ?? 0;
+  player.routeStats = {};
+  player.maxSpeedMps = BASE_SPEED_MPS;
   player.pendingQuestion = null;
   player.pendingDecisionPoint = null;
   player.questionState = createInitialPlayerQuestionState();
@@ -745,6 +747,7 @@ function updatePlayerMovement(room: GameRoomStateRecord, player: PlayerStateReco
   } else if (player.speedMps > targetSpeed) {
     player.speedMps = Math.max(targetSpeed, player.speedMps - (DRAG_MPS2 * safeDt));
   }
+  player.maxSpeedMps = Math.max(player.maxSpeedMps ?? 0, player.speedMps);
 
   const trackLength = room.trackLengthMeters;
   const totalRaceDistance = room.totalLaps * trackLength;
@@ -971,7 +974,9 @@ function buildStateUpdate(room: GameRoomStateRecord, now: number): GameStateUpda
       streak: Math.max(0, Math.trunc(player.correctStreak ?? 0)),
       averageAnswerTimeMs: (player.answerCount ?? 0) > 0
         ? Math.round(Math.max(0, player.totalAnswerTimeMs ?? 0) / Math.max(1, player.answerCount ?? 1))
-        : 0
+        : 0,
+      routeStats: player.routeStats ?? {},
+      maxSpeedMps: Math.max(0, player.maxSpeedMps ?? player.speedMps ?? 0)
     };
   });
 
@@ -1626,6 +1631,11 @@ export function submitAnswer(
   );
   player.answerCount = Math.max(0, player.answerCount ?? 0) + 1;
   player.totalAnswerTimeMs = Math.max(0, player.totalAnswerTimeMs ?? 0) + answeredInMs;
+  player.routeStats = {
+    ...(player.routeStats ?? {}),
+    [pending.question.routeMode]: Math.max(0, player.routeStats?.[pending.question.routeMode] ?? 0) + 1
+  };
+  player.maxSpeedMps = Math.max(player.maxSpeedMps ?? 0, player.speedMps ?? 0);
   const updatedProgress = applyProgressDelta(room, player, score.progressDelta);
 
   if (resultType === "CORRECT") {
@@ -2506,6 +2516,8 @@ export function teacherFinishRoom(
   room.isLocked = true;
   room.teacherLastSeenAtMs = now;
   room.lastInteractionAtMs = now;
+  room.winnerPlayerId = room.winnerPlayerId ?? sortedPlayers(room)[0]?.playerId ?? null;
+  room.resultHistoryId = room.resultHistoryId ?? buildHistoryId(room.roomId, room.raceStartedAtMs);
   for (const player of Object.values(room.players)) {
     player.racePhase = "finish";
     player.pendingQuestion = null;
@@ -2624,7 +2636,17 @@ export function buildRaceHistoryRow(room: GameRoomStateRecord): RaceHistoryRow |
     lap: player.lap,
     positionMeters: player.positionMeters,
     speedMps: player.speedMps,
-    finished: player.finished
+    finished: player.finished,
+    score: Math.max(0, player.score ?? 0),
+    correctAnswers: Math.max(0, player.correctAnswers ?? 0),
+    wrongAnswers: Math.max(0, player.wrongAnswers ?? 0),
+    timeoutAnswers: Math.max(0, player.timeoutAnswers ?? 0),
+    averageAnswerTimeMs: (player.answerCount ?? 0) > 0
+      ? Math.round(Math.max(0, player.totalAnswerTimeMs ?? 0) / Math.max(1, player.answerCount ?? 1))
+      : 0,
+    routeMode: player.questionState?.routeMode ?? "NORMAL",
+    routeStats: player.routeStats ?? {},
+    maxSpeedMps: Math.max(0, player.maxSpeedMps ?? player.speedMps ?? 0)
   }));
 
   return {
@@ -2639,6 +2661,9 @@ export function buildRaceHistoryRow(room: GameRoomStateRecord): RaceHistoryRow |
       roomId: room.roomId,
       tick: room.tick,
       createdAtMs: room.createdAtMs,
+      raceStartedAtMs: room.raceStartedAtMs,
+      raceStoppedAtMs: room.raceStoppedAtMs,
+      mapId: room.mapId ?? room.roomSettings.mapId ?? null,
       standings
     })
   };

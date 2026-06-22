@@ -657,6 +657,7 @@ export class DemoRaceClient {
       const previousAnswers = (current.correctAnswers ?? 0) + (current.wrongAnswers ?? 0) + (current.timeoutAnswers ?? 0);
       const previousAverage = current.averageAnswerTimeMs ?? 0;
       const nextAnswers = previousAnswers + 1;
+      const answeredRoute = session.questionState.currentQuestion?.routeMode ?? current.routeMode ?? "NORMAL";
       const updatedPlayer: PlayerSnapshot = {
         ...current,
         score: nextScore,
@@ -669,7 +670,12 @@ export class DemoRaceClient {
         wrongAnswers: (current.wrongAnswers ?? 0) + (wrong ? 1 : 0),
         timeoutAnswers: (current.timeoutAnswers ?? 0) + (resultType === "TIMEOUT" ? 1 : 0),
         streak: correct ? (current.streak ?? 0) + 1 : 0,
-        averageAnswerTimeMs: Math.round(((previousAverage * previousAnswers) + answeredInMs) / nextAnswers)
+        averageAnswerTimeMs: Math.round(((previousAverage * previousAnswers) + answeredInMs) / nextAnswers),
+        routeStats: {
+          ...(current.routeStats ?? {}),
+          [answeredRoute]: Math.max(0, current.routeStats?.[answeredRoute] ?? 0) + 1
+        },
+        maxSpeedMps: Math.max(current.maxSpeedMps ?? 0, current.speedMps ?? 0)
       };
       const players = finished
         ? Object.fromEntries(Object.values(room.players).map((player) => [
@@ -1020,7 +1026,8 @@ export class DemoRaceClient {
           speedMps: finished ? 0 : effectiveSpeed,
           lap: finished ? room.totalLaps : 0,
           finished,
-          racePhase: finished ? "finish" : "active"
+          racePhase: finished ? "finish" : "active",
+          maxSpeedMps: Math.max(localPlayer.maxSpeedMps ?? 0, effectiveSpeed)
         };
       }
 

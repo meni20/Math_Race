@@ -137,11 +137,14 @@ export function TeacherDashboard({
         playerId: player.playerId,
         name: player.name,
         score: player.score,
+        positionMeters: player.score,
         correctAnswers: player.correctAnswers,
         wrongAnswers: player.wrongAnswers,
         timeoutAnswers: player.timeoutAnswers,
         averageAnswerTimeMs: player.averageAnswerTimeMs,
-        routeMode: player.routeMode
+        routeMode: player.routeMode,
+        routeStats: player.routeStats,
+        maxSpeedMps: player.maxSpeedMps
       }))
     });
     if (saved) {
@@ -310,7 +313,7 @@ export function TeacherDashboard({
     if (!canEnd) {
       return;
     }
-    void clientRef.current?.returnToLobby().then(refreshRooms).catch((error) => {
+    void clientRef.current?.endRace().then(refreshRooms).catch((error) => {
       const message = error instanceof Error ? error.message : "לא ניתן לסיים את המרוץ.";
       setLastClassroomError(message);
       setConnectionMessage(message);

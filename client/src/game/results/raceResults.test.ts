@@ -14,6 +14,11 @@ function player(playerId: string, score: number, time: number | null, sourceOrde
     timeoutAnswers: 0,
     averageAnswerTimeMs: time,
     routeMode: "",
+    routeStats: {},
+    totalDistanceMeters: score,
+    totalRaceTimeMs: null,
+    averageSpeedMps: null,
+    maxSpeedMps: null,
     sourceOrder
   };
 }
@@ -49,13 +54,15 @@ export function runRaceResultsTests() {
     roomSettings: { raceName: "Refresh race" },
     players: [
       { playerId: "second", displayName: "Second", score: 40, averageAnswerTimeMs: 900 },
-      { playerId: "first", displayName: "First", score: 50, averageAnswerTimeMs: 1400 }
+      { playerId: "first", displayName: "First", score: 50, averageAnswerTimeMs: 1400, routeStats: { HIGHWAY: 1, DIRT_ROAD: 2 }, maxSpeedMps: 25 }
     ]
   });
   assert(saved?.players[0].playerId === "first", "Saved results are ranked before navigation.");
   const reloaded = loadRaceResults("refresh-test");
   assert(reloaded?.raceName === "Refresh race", "Saved results survive a route refresh.");
   assert(reloaded?.players[0].playerId === "first", "Reloaded results preserve the final ranking.");
+  assert(reloaded?.players[0].routeStats.DIRT_ROAD === 2, "Reloaded results preserve per-route history.");
+  assert(reloaded?.players[0].maxSpeedMps === 25, "Reloaded results preserve maximum speed.");
 
   Reflect.deleteProperty(globalThis, "window");
 }

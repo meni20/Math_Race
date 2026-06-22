@@ -53,6 +53,9 @@ public class RaceHistoryService {
                 row.put("lap", player.getLap());
                 row.put("positionMeters", player.getPositionMeters());
                 row.put("speedMps", player.getSpeedMps());
+                row.put("maxSpeedMps", player.getMaxSpeedMps());
+                row.put("routeMode", player.getRouteMode());
+                row.put("routeStats", player.getRouteStats());
                 row.put("finished", player.isFinished());
                 return row;
             })

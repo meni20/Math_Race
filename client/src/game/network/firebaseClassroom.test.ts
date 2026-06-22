@@ -1,4 +1,5 @@
 import { getClassroomTerminalRank, isExplicitClassroomReset } from "./firebaseClassroom";
+import { finishLocalClassroomRoom } from "./classroomLifecycle";
 import type { LocalClassroomRoom } from "./localClassroom";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -31,6 +32,15 @@ export function runFirebaseClassroomTests() {
   assert(getClassroomTerminalRank(room({ deletedAtMs: 3 })) === 3, "A deleted room has the highest terminal lifecycle.");
   assert(isExplicitClassroomReset(room({ racePhase: "lobby", raceStartedAtMs: 0 })), "A clean lobby snapshot may deliberately reset a finished room.");
   assert(!isExplicitClassroomReset(room()), "A stale active snapshot is not an explicit reset.");
+  const manuallyFinished = finishLocalClassroomRoom(room({
+    players: {
+      leader: { playerId: "leader", displayName: "Leader", laneIndex: 0, positionMeters: 80, speedMps: 12, lap: 0, finished: false, racePhase: "active", score: 80 },
+      second: { playerId: "second", displayName: "Second", laneIndex: 1, positionMeters: 50, speedMps: 10, lap: 0, finished: false, racePhase: "active", score: 50 }
+    }
+  }), 5000);
+  assert(manuallyFinished.winnerPlayerId === "leader", "Teacher end selects the current leader for final results.");
+  assert(manuallyFinished.raceStopped && manuallyFinished.racePhase === "finish", "Teacher end makes the room terminal.");
+  assert(Object.values(manuallyFinished.players).every((player) => player.racePhase === "finish" && player.speedMps === 0), "Teacher end freezes every participant.");
 }
 
 runFirebaseClassroomTests();

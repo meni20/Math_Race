@@ -124,7 +124,9 @@ export function buildTeacherPlayers(
         routeMode: player.routeMode,
         connected: player.connected !== false,
         streak: Math.max(0, Math.trunc(player.streak ?? 0)),
-        averageAnswerTimeMs: Math.max(0, Math.trunc(player.averageAnswerTimeMs ?? 0))
+        averageAnswerTimeMs: Math.max(0, Math.trunc(player.averageAnswerTimeMs ?? 0)),
+        routeStats: player.routeStats,
+        maxSpeedMps: player.maxSpeedMps
       };
     });
 }
