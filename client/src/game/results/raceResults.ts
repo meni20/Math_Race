@@ -42,6 +42,33 @@ export interface SaveRaceResultsInput {
   players: Array<Partial<PlayerSnapshot> & { playerId: string; displayName?: string; name?: string }>;
 }
 
+export type RaceRoute = "NORMAL" | "HIGHWAY" | "DIRT_ROAD";
+
+export function normalizeRaceRoute(routeMode: string | null | undefined): RaceRoute {
+  const route = (routeMode ?? "").trim().toUpperCase();
+  if (route.includes("HIGHWAY")) return "HIGHWAY";
+  if (route.includes("DIRT")) return "DIRT_ROAD";
+  return "NORMAL";
+}
+
+export function getRaceResultRoutes(player: Pick<RaceResultPlayer, "routeMode" | "routeStats">) {
+  const routes = new Map<RaceRoute, number>();
+  for (const [route, count] of Object.entries(player.routeStats ?? {})) {
+    const safeRoute = normalizeRaceRoute(route);
+    const safeValue = safeCount(count);
+    if (safeValue > 0) {
+      routes.set(safeRoute, (routes.get(safeRoute) ?? 0) + safeValue);
+    }
+  }
+
+  const currentRoute = normalizeRaceRoute(player.routeMode);
+  const hasCurrentRoute = Boolean(player.routeMode?.trim());
+  if ((hasCurrentRoute || routes.size === 0) && !routes.has(currentRoute)) {
+    routes.set(currentRoute, 1);
+  }
+  return [...routes.entries()].sort((left, right) => right[1] - left[1]);
+}
+
 function safeCount(value: number | undefined) {
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value ?? 0)) : 0;
 }

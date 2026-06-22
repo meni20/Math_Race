@@ -468,5 +468,20 @@ verify_jwt = false
 [functions.list-active-classroom-rooms]
 verify_jwt = false
 
+[functions.get-classroom-room]
+verify_jwt = false
+
+[functions.auth-login]
+verify_jwt = false
+
+[functions.auth-current-user]
+verify_jwt = false
+
+[functions.auth-create-user]
+verify_jwt = false
+
+[functions.auth-logout]
+verify_jwt = false
+
 [functions.admin-list-users]
 verify_jwt = false

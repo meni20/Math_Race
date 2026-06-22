@@ -1,4 +1,4 @@
-import type { PlayerSnapshot, RoomSettings, TrackTheme } from "../../game/types/messages";
+import type { PlayerSnapshot, RacePhase, RoomSettings, TrackTheme } from "../../game/types/messages";
 import { getGarageCarById } from "../../game/utils/carCatalog";
 import { normalizeRoomId } from "../../game/utils/gameIds";
 import { DEFAULT_TARGET_SCORE, MAX_TARGET_SCORE, MIN_TARGET_SCORE, normalizeRoomSettings } from "../../game/utils/roomSettings";
@@ -19,6 +19,22 @@ export const DEFAULT_TEACHER_CONFIG: TeacherRaceConfig = {
   difficulty: "MEDIUM",
   targetScore: DEFAULT_TARGET_SCORE
 };
+
+export function isStaleTeacherRaceUpdate(
+  currentPhase: RacePhase,
+  currentRaceStartedAtMs: number,
+  currentTick: number,
+  incomingPhase: RacePhase,
+  incomingRaceStartedAtMs: number,
+  incomingTick: number
+) {
+  return currentPhase === "active"
+    && incomingPhase === "active"
+    && currentRaceStartedAtMs > 0
+    && incomingRaceStartedAtMs === currentRaceStartedAtMs
+    && Number.isFinite(incomingTick)
+    && incomingTick < currentTick;
+}
 
 export function buildRandomId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {

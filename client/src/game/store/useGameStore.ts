@@ -197,6 +197,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const raceStoppedAtMs = typeof message.raceStoppedAtMs === "number" ? message.raceStoppedAtMs : 0;
       const roomRacePhase = normalizeRacePhase(message.racePhase, raceStopped, message.raceStartedAtMs);
       const raceStartedAtFromServer = typeof message.raceStartedAtMs === "number" ? message.raceStartedAtMs : 0;
+      const staleActiveSnapshot = state.roomRacePhase === "active"
+        && roomRacePhase === "active"
+        && state.raceStartedAtMs > 0
+        && raceStartedAtFromServer === state.raceStartedAtMs
+        && Number.isFinite(message.tick)
+        && message.tick < state.latestTick;
+      if (staleActiveSnapshot) {
+        return state;
+      }
       const receivedAtMs = Date.now();
       const winnerPlayerId = message.winnerPlayerId ?? "";
       const minimumPlayers = Math.max(2, message.players.length || state.playerIds.length || 0);

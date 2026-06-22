@@ -178,13 +178,13 @@ function Track({
       <span className={`absolute left-1 top-0 text-[8px] font-black uppercase tracking-[0.12em] ${inactive ? "text-slate-600" : "text-emerald-100/85"}`}>{labels.start}</span>
       <span className={`absolute right-1 top-0 text-[8px] font-black uppercase tracking-[0.12em] ${inactive ? "text-slate-600" : "text-rose-100/85"}`}>{labels.finish}</span>
       <div className={`absolute left-6 right-6 top-1/2 h-2 -translate-y-1/2 rounded-full ${inactive ? "bg-slate-800/65" : "bg-slate-950/80"}`}>
-        <div className={`h-full rounded-full transition-[width] duration-300 ${inactive ? "bg-slate-700" : "bg-cyan-300/75"}`} style={{ width: `${boundedProgress}%` }} />
+        <div className={`h-full rounded-full transition-[width] duration-700 ease-out ${inactive ? "bg-slate-700" : "bg-cyan-300/75"}`} style={{ width: `${boundedProgress}%` }} />
       </div>
       <div className={`absolute left-6 right-6 top-1/2 h-px -translate-y-1/2 ${inactive ? "bg-slate-600/35" : "bg-white/18"}`} />
       {player ? (
         <div className="absolute left-6 right-6 top-1/2 z-20 -translate-y-1/2">
           <div
-            className="absolute top-1/2 w-11 -translate-x-1/2 -translate-y-1/2 transition-[left] duration-300 ease-out"
+            className="absolute top-1/2 w-11 -translate-x-1/2 -translate-y-1/2 transition-[left] duration-700 ease-out"
             style={{ left: getTeacherCarLeftPercent(boundedProgress) }}
           >
             <TeacherCarIcon carId={player.carId} label={player.carName} className="drop-shadow-[0_7px_12px_rgba(0,0,0,0.4)]" />

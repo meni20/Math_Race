@@ -1,4 +1,4 @@
-import { loadRaceResults, rankRaceResults, saveRaceResults, type RaceResultPlayer } from "./raceResults";
+import { getRaceResultRoutes, loadRaceResults, rankRaceResults, saveRaceResults, type RaceResultPlayer } from "./raceResults";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -63,6 +63,12 @@ export function runRaceResultsTests() {
   assert(reloaded?.players[0].playerId === "first", "Reloaded results preserve the final ranking.");
   assert(reloaded?.players[0].routeStats.DIRT_ROAD === 2, "Reloaded results preserve per-route history.");
   assert(reloaded?.players[0].maxSpeedMps === 25, "Reloaded results preserve maximum speed.");
+
+  const mergedRoutes = getRaceResultRoutes({ routeMode: "HIGHWAY", routeStats: { NORMAL: 16 } });
+  assert(mergedRoutes.some(([route, count]) => route === "NORMAL" && count === 16), "Route summary keeps persisted regular-route history.");
+  assert(mergedRoutes.some(([route, count]) => route === "HIGHWAY" && count === 1), "Route summary includes the player's current highway route.");
+  const normalizedDirtRoutes = getRaceResultRoutes({ routeMode: "normal", routeStats: { dirt: 2 } });
+  assert(normalizedDirtRoutes.some(([route]) => route === "DIRT_ROAD"), "Route summary normalizes dirt-road aliases.");
 
   Reflect.deleteProperty(globalThis, "window");
 }

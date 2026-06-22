@@ -70,6 +70,18 @@ export function runQuestionLifecycleStoreTests() {
   } satisfies RoomJoinedMessage);
   useGameStore.getState().applyStateUpdate(activeStateUpdate());
 
+  useGameStore.getState().applyStateUpdate({
+    ...activeStateUpdate(),
+    tick: 3,
+    players: [{ ...activeStateUpdate().players[0], score: 30, positionMeters: 30 }]
+  });
+  useGameStore.getState().applyStateUpdate({
+    ...activeStateUpdate(),
+    tick: 2,
+    players: [{ ...activeStateUpdate().players[0], score: 20, positionMeters: 20 }]
+  });
+  assert(useGameStore.getState().players.p1.score === 30, "An older active-race snapshot cannot rewind authoritative progress.");
+
   const oldQuestion = question("old", 1000);
   const nextQuestion = question("next", 2000);
   useGameStore.getState().applyQuestion(oldQuestion, "submit-answer");

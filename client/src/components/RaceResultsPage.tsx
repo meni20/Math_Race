@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { loadRaceResults, type RaceResultPlayer } from "../game/results/raceResults";
+import {
+  getRaceResultRoutes,
+  loadRaceResults,
+  normalizeRaceRoute,
+  type RaceResultPlayer
+} from "../game/results/raceResults";
 
 interface RaceResultsPageProps {
   sessionId: string;
@@ -25,19 +30,19 @@ function formatTime(milliseconds: number | null) {
 }
 
 function routeLabel(routeMode: string) {
-  const route = routeMode.toUpperCase();
-  if (route.includes("HIGHWAY")) return "אוטוסטרדה";
-  if (route.includes("DIRT")) return "דרך עפר";
-  return routeMode.trim() || "מסלול רגיל";
+  const route = normalizeRaceRoute(routeMode);
+  if (route === "HIGHWAY") return "אוטוסטרדה";
+  if (route === "DIRT_ROAD") return "דרך עפר";
+  return "מסלול רגיל";
 }
 
 function usedRoute(player: RaceResultPlayer, route: string) {
-  return (player.routeStats?.[route] ?? 0) > 0 || player.routeMode.toUpperCase().includes(route === "DIRT_ROAD" ? "DIRT" : route);
+  const normalizedRoute = normalizeRaceRoute(route);
+  return getRaceResultRoutes(player).some(([playerRoute]) => playerRoute === normalizedRoute);
 }
 
 function primaryRoute(player: RaceResultPlayer) {
-  const rankedRoutes = Object.entries(player.routeStats ?? {}).sort((left, right) => right[1] - left[1]);
-  return rankedRoutes[0]?.[0] ?? player.routeMode;
+  return getRaceResultRoutes(player)[0]?.[0] ?? normalizeRaceRoute(player.routeMode);
 }
 
 function formatRaceDuration(milliseconds: number | null) {
@@ -171,21 +176,19 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
               <thead className="text-xs font-black text-indigo-600">
                 <tr>
                   <th className="pb-3">דירוג</th><th className="pb-3">משתתף</th><th className="pb-3">ניקוד</th>
-                  <th className="pb-3">זמן מרוץ</th><th className="pb-3">מרחק</th><th className="pb-3">מהירות ממוצעת</th>
+                  <th className="pb-3">זמן מרוץ</th>
                   <th className="pb-3">מהירות מרבית</th><th className="pb-3">מסלולים</th>
                 </tr>
               </thead>
               <tbody>
                 {players.map((player, index) => {
-                  const routes = Object.entries(player.routeStats ?? {}).filter(([, count]) => count > 0);
+                  const routes = getRaceResultRoutes(player);
                   return (
                     <tr key={player.playerId} className="border-t border-slate-100 font-semibold text-slate-700">
                       <td className="py-3 font-black text-indigo-600">{index + 1}</td>
                       <td className="py-3 font-black text-slate-950">{player.name}</td>
                       <td className="py-3">{player.score}</td>
                       <td className="py-3">{formatRaceDuration(player.totalRaceTimeMs)}</td>
-                      <td className="py-3">{Math.round(player.totalDistanceMeters)} מ׳</td>
-                      <td className="py-3">{formatSpeed(player.averageSpeedMps)}</td>
                       <td className="py-3">{formatSpeed(player.maxSpeedMps)}</td>
                       <td className="py-3">{routes.length ? routes.map(([route, count]) => `${routeLabel(route)} (${count})`).join(" · ") : routeLabel(player.routeMode)}</td>
                     </tr>

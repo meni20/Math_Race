@@ -12,7 +12,7 @@ import { normalizeCarId } from "../../game/utils/carSelection";
 import { DEFAULT_TARGET_SCORE, normalizeRoomSettings } from "../../game/utils/roomSettings";
 import { connectTeacherRoomLiveUpdates, type TeacherRoomLiveSubscription } from "../../game/sync/teacherLiveSubscription";
 import { recordNetworkRequest, startSyncLifecycle, stopSyncLifecycle, updateSyncLifecycle } from "../../game/sync/syncLifecycle";
-import { buildTeacherPlayers, configToRoomSettings } from "./teacherUtils";
+import { buildTeacherPlayers, configToRoomSettings, isStaleTeacherRaceUpdate } from "./teacherUtils";
 import type { TeacherLiveTransportState, TeacherPlayerStatus, TeacherRaceConfig, TeacherRoomLifecycleStatus, TeacherRoomSnapshot, TeacherRoomSummary } from "./teacherTypes";
 import type { TeacherRoomLiveUpdate } from "../../game/sync/teacherLiveSubscription";
 
@@ -187,6 +187,7 @@ export class TeacherGameClient {
   private connectionListener: ConnectionListener | null = null;
   private localStatuses: Record<string, TeacherPlayerStatus> = {};
   private latestSnapshot: TeacherRoomSnapshot | null = null;
+  private latestUpdateTick = -1;
 
   onSnapshot(listener: SnapshotListener) {
     this.snapshotListener = listener;
@@ -406,6 +407,16 @@ export class TeacherGameClient {
   }
 
   private applyUpdate(update: GameStateUpdateMessage) {
+    if (this.latestSnapshot && isStaleTeacherRaceUpdate(
+      this.latestSnapshot.racePhase,
+      this.latestSnapshot.raceStartedAtMs,
+      this.latestUpdateTick,
+      update.racePhase,
+      update.raceStartedAtMs,
+      update.tick
+    )) {
+      return;
+    }
     const nextSnapshot = snapshotFromStateUpdate(update, this.localStatuses);
     for (const player of nextSnapshot.players) {
       if (!this.localStatuses[player.playerId]) {
@@ -413,6 +424,7 @@ export class TeacherGameClient {
       }
     }
     this.latestSnapshot = snapshotFromStateUpdate(update, this.localStatuses);
+    this.latestUpdateTick = Number.isFinite(update.tick) ? update.tick : this.latestUpdateTick;
     this.snapshotListener?.(this.latestSnapshot);
     if (isTerminalLifecycle(this.latestSnapshot.lifecycleStatus)) {
       this.stopSupabaseSync(this.latestSnapshot.lifecycleStatus.toLowerCase());
@@ -822,6 +834,7 @@ export class TeacherGameClient {
       this.localUnsubscribe();
       this.localUnsubscribe = null;
     }
+    this.latestUpdateTick = -1;
   }
 
   private getSupabaseClient() {
