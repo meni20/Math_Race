@@ -142,6 +142,16 @@ function shouldUseLocalClassroomAdapter() {
   return Boolean(import.meta.env.DEV) || isExplicitLocalDevEnabled() || isFirebaseClassroomEnabled();
 }
 
+export function resolveClassroomAdapterMode(input: {
+  supabaseConfigured: boolean;
+  localDevEnabled: boolean;
+}): ClassroomAdapterMode {
+  if (input.supabaseConfigured) {
+    return "supabase";
+  }
+  return input.localDevEnabled ? "local-dev" : "unavailable";
+}
+
 function getLocalDevSessionId() {
   if (typeof window === "undefined") {
     return "server";
@@ -166,27 +176,28 @@ function getLocalDevSessionId() {
 
 export function getClassroomAdapterInfo(): ClassroomAdapterInfo {
   const supabaseConfigured = Boolean(getSupabaseTransportConfig());
-  const localDevEnabled = isExplicitLocalDevEnabled()
+  const localDevRequested = isExplicitLocalDevEnabled()
     || isFirebaseClassroomEnabled()
     || (!supabaseConfigured && shouldUseLocalClassroomAdapter());
-  const info: ClassroomAdapterInfo = localDevEnabled
+  const mode = resolveClassroomAdapterMode({ supabaseConfigured, localDevEnabled: localDevRequested });
+  const info: ClassroomAdapterInfo = mode === "supabase"
     ? {
-      mode: "local-dev",
-      supabaseConfigured,
-      localDevEnabled,
-      message: isFirebaseClassroomEnabled() ? "Firebase classroom cloud mode" : "Local classroom dev mode"
-    }
-    : supabaseConfigured
-    ? {
-      mode: "supabase",
+      mode,
       supabaseConfigured,
       localDevEnabled: false,
       message: "Using Supabase classroom database."
     }
+    : mode === "local-dev"
+    ? {
+      mode: "local-dev",
+      supabaseConfigured,
+      localDevEnabled: true,
+      message: isFirebaseClassroomEnabled() ? "Firebase classroom cloud mode" : "Local classroom dev mode"
+    }
     : {
       mode: "unavailable",
       supabaseConfigured,
-      localDevEnabled,
+      localDevEnabled: false,
       message: "Supabase is not configured. Classroom rooms cannot be created."
     };
 

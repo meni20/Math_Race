@@ -473,12 +473,16 @@ class GameSocketClient {
     ) {
       return "demo";
     }
+    const configuredTransport = getConfiguredGameTransport();
+    if (configuredTransport === "supabase") {
+      return "supabase";
+    }
     const localClassroomEnabled = String(import.meta.env.VITE_CLASSROOM_LOCAL_DEV ?? "").toLowerCase() === "true"
       || isFirebaseClassroomEnabled();
     if (localClassroomEnabled) {
       return "demo";
     }
-    return getConfiguredGameTransport();
+    return configuredTransport;
   }
 
   private async disconnectInternal(resetSession: boolean) {

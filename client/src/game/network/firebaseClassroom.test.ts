@@ -1,4 +1,5 @@
-import { getClassroomTerminalRank, isExplicitClassroomReset } from "./firebaseClassroom";
+import { getClassroomTerminalRank, isExplicitClassroomReset, shouldEnableFirebaseClassroom } from "./firebaseClassroom";
+import { resolveClassroomAdapterMode } from "./classroomRooms";
 import { finishLocalClassroomRoom } from "./classroomLifecycle";
 import type { LocalClassroomRoom } from "./localClassroom";
 
@@ -26,6 +27,9 @@ function room(overrides: Partial<LocalClassroomRoom> = {}): LocalClassroomRoom {
 }
 
 export function runFirebaseClassroomTests() {
+  assert(!shouldEnableFirebaseClassroom({ explicitFirebase: true, firebaseConfigured: true, supabaseConfigured: true }), "Supabase disables Firestore classroom writers when both are configured.");
+  assert(shouldEnableFirebaseClassroom({ explicitFirebase: true, firebaseConfigured: true, supabaseConfigured: false }), "Firestore remains available only as a no-Supabase fallback.");
+  assert(resolveClassroomAdapterMode({ supabaseConfigured: true, localDevEnabled: true }) === "supabase", "Supabase is the single classroom source of truth when configured.");
   assert(getClassroomTerminalRank(room()) === 0, "An active room is not terminal.");
   assert(getClassroomTerminalRank(room({ racePhase: "finish", raceStopped: true })) === 1, "A finished room is terminal.");
   assert(getClassroomTerminalRank(room({ closedAtMs: 2 })) === 2, "A closed room advances terminal lifecycle.");

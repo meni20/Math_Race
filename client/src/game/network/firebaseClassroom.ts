@@ -1,6 +1,7 @@
 import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import { collection, doc, getDoc, getDocs, getFirestore, onSnapshot, runTransaction } from "firebase/firestore";
 import type { LocalClassroomRoom } from "./localClassroom";
+import { getSupabaseTransportConfig } from "./transportConfig";
 
 type FirebaseWebConfig = FirebaseOptions & {
   apiKey: string;
@@ -46,8 +47,20 @@ async function loadHostingConfig(): Promise<FirebaseWebConfig | null> {
   }
 }
 
+export function shouldEnableFirebaseClassroom(input: {
+  explicitFirebase: boolean;
+  firebaseConfigured: boolean;
+  supabaseConfigured: boolean;
+}) {
+  return !input.supabaseConfigured && (input.explicitFirebase || input.firebaseConfigured);
+}
+
 export function isFirebaseClassroomEnabled() {
-  return String(import.meta.env.VITE_CLASSROOM_FIREBASE ?? "").toLowerCase() === "true" || Boolean(envConfig());
+  return shouldEnableFirebaseClassroom({
+    explicitFirebase: String(import.meta.env.VITE_CLASSROOM_FIREBASE ?? "").toLowerCase() === "true",
+    firebaseConfigured: Boolean(envConfig()),
+    supabaseConfigured: Boolean(getSupabaseTransportConfig())
+  });
 }
 
 async function getFirebaseWebConfig() {
