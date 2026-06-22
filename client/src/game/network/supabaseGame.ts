@@ -17,7 +17,6 @@ import type {
 } from "../types/messages";
 import { getSupabaseTransportConfig } from "./transportConfig";
 import {
-  countNetworkRequests,
   recordNetworkRequest,
   startSyncLifecycle,
   stopSyncLifecycle,
@@ -51,6 +50,8 @@ const STUDENT_SYNC_INTERVALS_MS = {
   maxBackoff: 30000
 };
 const STUDENT_REALTIME_STALE_MS = 45000;
+const STUDENT_PRESENCE_HEARTBEAT_MS = 10000;
+const SUPABASE_SESSION_STORAGE_PREFIX = "asphalt8.supabase.session";
 
 interface SessionPayload {
   roomId: string;
@@ -126,6 +127,44 @@ function buildSessionId() {
   return `session-${Math.random().toString(36).slice(2, 12)}`;
 }
 
+function sessionStorageKey(payload: Pick<ConnectPayload, "roomId" | "playerId">) {
+  return `${SUPABASE_SESSION_STORAGE_PREFIX}:${payload.roomId}:${payload.playerId}`;
+}
+
+export function getOrCreateSupabaseSessionId(payload: Pick<ConnectPayload, "roomId" | "playerId">) {
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") {
+    return buildSessionId();
+  }
+  const key = sessionStorageKey(payload);
+  const existing = window.sessionStorage.getItem(key)?.trim();
+  if (existing) {
+    return existing;
+  }
+  const sessionId = buildSessionId();
+  window.sessionStorage.setItem(key, sessionId);
+  return sessionId;
+}
+
+export function getStudentSyncDelayMs(input: {
+  realtimeHealthy: boolean;
+  lastRealtimeEventAtMs: number;
+  nowMs: number;
+  fallbackIntervalMs: number;
+}) {
+  if (!input.realtimeHealthy) {
+    return input.fallbackIntervalMs;
+  }
+  const untilRealtimeStale = Math.max(0, (input.lastRealtimeEventAtMs + STUDENT_REALTIME_STALE_MS) - input.nowMs);
+  return Math.min(STUDENT_PRESENCE_HEARTBEAT_MS, untilRealtimeStale);
+}
+
+function clearSessionId(payload: Pick<ConnectPayload, "roomId" | "playerId"> | null) {
+  if (!payload || typeof window === "undefined" || typeof window.sessionStorage === "undefined") {
+    return;
+  }
+  window.sessionStorage.removeItem(sessionStorageKey(payload));
+}
+
 export class SupabaseGameClient {
   private client: SupabaseClient | null = null;
   private currentSessionId: string | null = null;
@@ -156,7 +195,7 @@ export class SupabaseGameClient {
       carId: normalizeCarId(payload.carId)
     };
 
-    this.currentSessionId = buildSessionId();
+    this.currentSessionId = getOrCreateSupabaseSessionId(normalizedPayload);
     this.currentConnectPayload = normalizedPayload;
     this.terminalStatusReceived = false;
     this.lastStopReason = "";
@@ -182,11 +221,12 @@ export class SupabaseGameClient {
     }
   }
 
-  async disconnect() {
+  async disconnect(notifyServer = true) {
     this.stopSyncLoop();
     await this.unsubscribeFromRoomChanges();
 
     const sessionPayload = this.getSessionPayload();
+    const connectPayload = this.currentConnectPayload;
     this.currentSessionId = null;
     this.currentConnectPayload = null;
 
@@ -194,10 +234,13 @@ export class SupabaseGameClient {
       return;
     }
 
-    try {
-      await this.invoke("leave-game", sessionPayload);
-    } catch {
-      // best-effort disconnect
+    if (notifyServer) {
+      clearSessionId(connectPayload);
+      try {
+        await this.invoke("leave-game", sessionPayload);
+      } catch {
+        // best-effort disconnect
+      }
     }
   }
 
@@ -377,10 +420,12 @@ export class SupabaseGameClient {
   }
 
   private getFallbackSyncDelayMs() {
-    if (this.isRealtimeHealthy()) {
-      return Math.max(0, (this.lastRealtimeEventAtMs + STUDENT_REALTIME_STALE_MS) - Date.now());
-    }
-    return this.getSyncIntervalMs();
+    return getStudentSyncDelayMs({
+      realtimeHealthy: this.isRealtimeHealthy(),
+      lastRealtimeEventAtMs: this.lastRealtimeEventAtMs,
+      nowMs: Date.now(),
+      fallbackIntervalMs: this.getSyncIntervalMs()
+    });
   }
 
   private getSyncIntervalMs() {
@@ -521,14 +566,6 @@ export class SupabaseGameClient {
     this.syncAbortController = new AbortController();
     try {
       recordNetworkRequest("sync-room", "student");
-      if (import.meta.env.DEV && this.isRealtimeHealthy() && countNetworkRequests("sync-room") > 1) {
-        console.warn("[supabase] sync-room ran repeatedly while student Realtime was healthy", {
-          roomId: sessionPayload.roomId,
-          playerId: sessionPayload.playerId,
-          realtimeStatus: this.realtimeStatus,
-          lastRealtimeEventAtMs: this.lastRealtimeEventAtMs
-        });
-      }
       const response = await this.invoke("sync-room", sessionPayload, this.syncAbortController.signal);
       if (generation !== this.syncGeneration) {
         return;

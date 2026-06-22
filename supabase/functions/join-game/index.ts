@@ -10,65 +10,6 @@ import { normalizeClassroomRoomCode } from "../_shared/teacher-room-identity.ts"
 
 type JoinPayload = JoinGameRequest & { roomCode?: string };
 
-async function playerExistsInRoom(admin: ReturnType<typeof createAdminClient>, roomId: string, playerId: string) {
-  const { data, error } = await admin
-    .from("game_rooms")
-    .select("state_json")
-    .eq("room_id", roomId)
-    .maybeSingle();
-  if (error) {
-    throw error;
-  }
-  const state = data?.state_json as { players?: Record<string, unknown> } | null | undefined;
-  return Boolean(state?.players?.[playerId]);
-}
-
-async function cleanupFailedNewJoin(admin: ReturnType<typeof createAdminClient>, roomId: string, playerId: string) {
-  const { data, error } = await admin
-    .from("game_rooms")
-    .select("version,state_json")
-    .eq("room_id", roomId)
-    .maybeSingle();
-  if (error || !data?.state_json) {
-    if (error) {
-      console.warn("[join-game] cleanup fetch failed", error);
-    }
-    return;
-  }
-  const state = structuredClone(data.state_json) as { players?: Record<string, unknown> };
-  if (!state.players?.[playerId]) {
-    return;
-  }
-  delete state.players[playerId];
-  const currentVersion = Number(data.version ?? 0);
-  const { error: updateError } = await admin
-    .from("game_rooms")
-    .update({
-      version: currentVersion + 1,
-      state_json: state,
-      updated_at: new Date().toISOString()
-    })
-    .eq("room_id", roomId)
-    .eq("version", currentVersion);
-  if (updateError) {
-    console.warn("[join-game] cleanup room update failed", updateError);
-  }
-  await admin
-    .from("game_room_presence")
-    .delete()
-    .eq("room_id", roomId)
-    .eq("player_id", playerId);
-
-  const classroomRoom = await findClassroomRoom(admin, roomId).catch(() => null);
-  if (classroomRoom?.id) {
-    await admin
-      .from("room_participants")
-      .delete()
-      .eq("room_id", classroomRoom.id)
-      .eq("player_id", playerId);
-  }
-}
-
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -78,8 +19,6 @@ Deno.serve(async (request) => {
   }
 
   let normalizedPayload: JoinGameRequest | null = null;
-  let createdNewPlayer = false;
-  let mutationStarted = false;
   const admin = createAdminClient();
   try {
     const payload = await readJsonRequest<JoinPayload>(request);
@@ -116,8 +55,6 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: buildError("ROOM_NOT_JOINABLE", "This classroom room is not joinable right now.", normalizedPayload.roomId, normalizedPayload.playerId) });
     }
     normalizedPayload.roomId = classroomRoom.roomCode;
-    createdNewPlayer = !(await playerExistsInRoom(admin, normalizedPayload.roomId, normalizedPayload.playerId));
-    mutationStarted = true;
     const result = await runRoomMutation(
       admin,
       normalizedPayload.roomId,
@@ -126,18 +63,10 @@ Deno.serve(async (request) => {
     );
     return jsonResponse(result.response);
   } catch (error) {
-    if (mutationStarted && createdNewPlayer && normalizedPayload) {
-      try {
-        await cleanupFailedNewJoin(admin, normalizedPayload.roomId, normalizedPayload.playerId);
-      } catch (cleanupError) {
-        console.warn("[join-game] cleanup failed", cleanupError);
-      }
-    }
     const message = safeErrorMessage(error, "Join failed with a non-Error exception.");
     logEdgeError("join-game", error, {
       roomId: normalizedPayload?.roomId,
-      playerId: normalizedPayload?.playerId,
-      cleanedUpNewPlayer: mutationStarted && createdNewPlayer
+      playerId: normalizedPayload?.playerId
     });
     return jsonResponse({
       error: buildDiagnosticError(

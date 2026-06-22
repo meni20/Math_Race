@@ -40,7 +40,7 @@ interface StoredWebsocketSession {
 }
 
 function canUsePersistentStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
 }
 
 function buildRandomToken(prefix: string) {
@@ -55,13 +55,13 @@ function getOrCreateWebsocketResumeToken() {
     return buildRandomToken("ws-resume-");
   }
 
-  const existing = window.localStorage.getItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY)?.trim();
+  const existing = window.sessionStorage.getItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY)?.trim();
   if (existing) {
     return existing;
   }
 
   const nextToken = buildRandomToken("ws-resume-");
-  window.localStorage.setItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY, nextToken);
+  window.sessionStorage.setItem(WEBSOCKET_RESUME_TOKEN_STORAGE_KEY, nextToken);
   return nextToken;
 }
 
@@ -69,14 +69,14 @@ function persistWebsocketSession(payload: StoredWebsocketSession) {
   if (!canUsePersistentStorage()) {
     return;
   }
-  window.localStorage.setItem(WEBSOCKET_SESSION_STORAGE_KEY, JSON.stringify(payload));
+  window.sessionStorage.setItem(WEBSOCKET_SESSION_STORAGE_KEY, JSON.stringify(payload));
 }
 
 function clearPersistedWebsocketSession() {
   if (!canUsePersistentStorage()) {
     return;
   }
-  window.localStorage.removeItem(WEBSOCKET_SESSION_STORAGE_KEY);
+  window.sessionStorage.removeItem(WEBSOCKET_SESSION_STORAGE_KEY);
 }
 
 function readPersistedWebsocketSession(): ConnectPayload | null {
@@ -84,7 +84,7 @@ function readPersistedWebsocketSession(): ConnectPayload | null {
     return null;
   }
 
-  const raw = window.localStorage.getItem(WEBSOCKET_SESSION_STORAGE_KEY);
+  const raw = window.sessionStorage.getItem(WEBSOCKET_SESSION_STORAGE_KEY);
   if (!raw) {
     return null;
   }
@@ -482,7 +482,7 @@ class GameSocketClient {
   }
 
   private async disconnectInternal(resetSession: boolean) {
-    await this.supabaseClient.disconnect();
+    await this.supabaseClient.disconnect(resetSession);
     await this.demoClient.disconnect();
     this.stopWebsocketSyncLoop();
     await this.deactivateCurrentClient(true);

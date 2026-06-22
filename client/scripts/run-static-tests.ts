@@ -3,6 +3,7 @@ import { test } from "vitest";
 const testModules = [
   "../src/components/FinishOverlay.test.tsx",
   "../src/components/teacher/TeacherRaceLane.test.ts",
+  "../src/game/network/classroomConnection.test.ts",
   "../src/game/network/demoRace.test.ts",
   "../src/game/network/firebaseClassroom.test.ts",
   "../src/game/questions/questionEngine.test.ts",
