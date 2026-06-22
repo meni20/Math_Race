@@ -20,6 +20,8 @@ export interface RaceResultsSnapshot {
   raceName: string;
   raceStartedAtMs: number;
   raceFinishedAtMs: number;
+  winnerPlayerId: string;
+  viewerPlayerId: string;
   savedAtMs: number;
   players: RaceResultPlayer[];
 }
@@ -29,6 +31,8 @@ export interface SaveRaceResultsInput {
   roomSettings?: Pick<RoomSettings, "raceName">;
   raceStartedAtMs?: number;
   raceFinishedAtMs?: number;
+  winnerPlayerId?: string | null;
+  viewerPlayerId?: string | null;
   players: Array<Partial<PlayerSnapshot> & { playerId: string; displayName?: string; name?: string }>;
 }
 
@@ -79,6 +83,8 @@ export function saveRaceResults(input: SaveRaceResultsInput) {
     raceName: input.roomSettings?.raceName?.trim() || "מרוץ מתמטיקה",
     raceStartedAtMs: Math.max(0, input.raceStartedAtMs ?? 0),
     raceFinishedAtMs: Math.max(0, input.raceFinishedAtMs ?? Date.now()),
+    winnerPlayerId: input.winnerPlayerId?.trim() || "",
+    viewerPlayerId: input.viewerPlayerId?.trim() || "",
     savedAtMs: Date.now(),
     players: rankRaceResults(input.players.map(normalizePlayer))
   };
@@ -95,7 +101,12 @@ export function loadRaceResults(sessionId: string): RaceResultsSnapshot | null {
     try {
       const parsed = JSON.parse(raw) as RaceResultsSnapshot;
       if (parsed.sessionId === sessionId && Array.isArray(parsed.players)) {
-        return { ...parsed, players: rankRaceResults(parsed.players) };
+        return {
+          ...parsed,
+          winnerPlayerId: parsed.winnerPlayerId ?? "",
+          viewerPlayerId: parsed.viewerPlayerId ?? "",
+          players: rankRaceResults(parsed.players)
+        };
       }
     } catch {
       // Fall through to the persisted classroom room snapshot.
@@ -111,6 +122,7 @@ export function loadRaceResults(sessionId: string): RaceResultsSnapshot | null {
     roomSettings: room.roomSettings,
     raceStartedAtMs: room.raceStartedAtMs,
     raceFinishedAtMs: room.raceStoppedAtMs || room.endedAtMs,
+    winnerPlayerId: room.winnerPlayerId,
     players: Object.values(room.players)
   });
 }

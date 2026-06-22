@@ -115,6 +115,10 @@ export function isSoloScoreTargetReached(score: number | null | undefined, targe
   return Math.max(0, Math.trunc(score ?? 0)) >= Math.max(1, Math.trunc(targetScore ?? DEFAULT_TARGET_SCORE));
 }
 
+export function getFirstFinishedPlayerId(players: Array<Pick<PlayerSnapshot, "playerId" | "finished">>) {
+  return players.find((player) => player.finished)?.playerId ?? null;
+}
+
 export function normalizeSoloBotCount(value: number) {
   if (!Number.isFinite(value)) {
     return 2;
@@ -547,7 +551,7 @@ export class DemoRaceClient {
 
   submitAnswer(answer: string, timeout = false) {
     const session = this.session;
-    if (!session) {
+    if (!session || session.raceStopped || session.racePhase !== "active") {
       return;
     }
 
@@ -640,6 +644,9 @@ export class DemoRaceClient {
       return;
     }
     updateLocalClassroomRoom(session.roomId, (room) => {
+      if (room.raceStopped || room.racePhase !== "active") {
+        return room;
+      }
       const current = room.players[playerId];
       if (!current) {
         return room;
@@ -650,32 +657,44 @@ export class DemoRaceClient {
       const previousAnswers = (current.correctAnswers ?? 0) + (current.wrongAnswers ?? 0) + (current.timeoutAnswers ?? 0);
       const previousAverage = current.averageAnswerTimeMs ?? 0;
       const nextAnswers = previousAnswers + 1;
+      const updatedPlayer: PlayerSnapshot = {
+        ...current,
+        score: nextScore,
+        positionMeters: nextScore,
+        speedMps: finished ? 0 : current.speedMps,
+        lap: finished ? room.totalLaps : current.lap,
+        finished: finished || current.finished,
+        racePhase: finished ? "finish" : current.racePhase,
+        correctAnswers: (current.correctAnswers ?? 0) + (correct ? 1 : 0),
+        wrongAnswers: (current.wrongAnswers ?? 0) + (wrong ? 1 : 0),
+        timeoutAnswers: (current.timeoutAnswers ?? 0) + (resultType === "TIMEOUT" ? 1 : 0),
+        streak: correct ? (current.streak ?? 0) + 1 : 0,
+        averageAnswerTimeMs: Math.round(((previousAverage * previousAnswers) + answeredInMs) / nextAnswers)
+      };
+      const players = finished
+        ? Object.fromEntries(Object.values(room.players).map((player) => [
+          player.playerId,
+          player.playerId === playerId
+            ? updatedPlayer
+            : { ...player, racePhase: "finish" as const, speedMps: 0 }
+        ]))
+        : { ...room.players, [playerId]: updatedPlayer };
+      const finishedAtMs = finished ? Date.now() : room.raceStoppedAtMs;
       return {
         ...room,
-        winnerPlayerId: finished && !room.winnerPlayerId ? playerId : room.winnerPlayerId,
-        players: {
-          ...room.players,
-          [playerId]: {
-            ...current,
-            score: nextScore,
-            positionMeters: nextScore,
-            lap: finished ? room.totalLaps : current.lap,
-            finished: finished || current.finished,
-            racePhase: finished ? "finish" : current.racePhase,
-            correctAnswers: (current.correctAnswers ?? 0) + (correct ? 1 : 0),
-            wrongAnswers: (current.wrongAnswers ?? 0) + (wrong ? 1 : 0),
-            timeoutAnswers: (current.timeoutAnswers ?? 0) + (resultType === "TIMEOUT" ? 1 : 0),
-            streak: correct ? (current.streak ?? 0) + 1 : 0,
-            averageAnswerTimeMs: Math.round(((previousAverage * previousAnswers) + answeredInMs) / nextAnswers)
-          }
-        }
+        racePhase: finished ? "finish" : room.racePhase,
+        raceStopped: finished,
+        raceStoppedAtMs: finishedAtMs,
+        endedAtMs: finished ? finishedAtMs : room.endedAtMs,
+        winnerPlayerId: finished ? (room.winnerPlayerId ?? playerId) : room.winnerPlayerId,
+        players
       };
     });
   }
 
   submitDecision(choice: DecisionChoiceRequest["choice"]) {
     const session = this.session;
-    if (!session || !session.pendingDecision) {
+    if (!session || session.raceStopped || session.racePhase !== "active" || !session.pendingDecision) {
       return;
     }
 
@@ -1005,8 +1024,8 @@ export class DemoRaceClient {
         };
       }
 
-      const allFinished = Object.values(players).length > 0 && Object.values(players).every((player) => player.finished);
-      const shouldFinish = racePhase === "active" && allFinished;
+      const firstFinisherId = getFirstFinishedPlayerId(Object.values(players));
+      const shouldFinish = racePhase === "active" && Boolean(firstFinisherId);
       if (shouldFinish) {
         shouldPersistLifecycleTick = true;
       }
@@ -1025,8 +1044,13 @@ export class DemoRaceClient {
         raceStartedAtMs: racePhase === "active" && room.raceStartedAtMs <= 0 ? now : room.raceStartedAtMs,
         raceStopped: shouldFinish,
         raceStoppedAtMs: shouldFinish ? now : 0,
-        winnerPlayerId: shouldFinish ? standings[0]?.playerId ?? null : room.winnerPlayerId,
-        players
+        winnerPlayerId: shouldFinish ? firstFinisherId ?? standings[0]?.playerId ?? null : room.winnerPlayerId,
+        players: shouldFinish
+          ? Object.fromEntries(Object.values(players).map((player) => [
+            player.playerId,
+            { ...player, racePhase: "finish" as const, speedMps: 0 }
+          ]))
+          : players
       };
     }, {
       persist: shouldPersistActiveTick,

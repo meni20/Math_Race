@@ -1,5 +1,5 @@
 import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
-import { collection, doc, getDoc, getDocs, getFirestore, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getFirestore, onSnapshot, runTransaction } from "firebase/firestore";
 import type { LocalClassroomRoom } from "./localClassroom";
 
 type FirebaseWebConfig = FirebaseOptions & {
@@ -91,12 +91,42 @@ function decodeRoom(data: unknown): LocalClassroomRoom | null {
   }
 }
 
+export function getClassroomTerminalRank(room: LocalClassroomRoom | null) {
+  if (!room) return 0;
+  if (room.deletedAtMs) return 3;
+  if (room.closedAtMs) return 2;
+  return room.raceStopped || room.racePhase === "finish" || room.endedAtMs ? 1 : 0;
+}
+
+export function isExplicitClassroomReset(room: LocalClassroomRoom) {
+  return room.racePhase === "lobby"
+    && !room.raceStopped
+    && !room.winnerPlayerId
+    && Object.values(room.players).every((player) => player.racePhase === "lobby" && !player.finished);
+}
+
 export async function writeFirebaseClassroomRoom(room: LocalClassroomRoom) {
   const db = await getClassroomDb();
   if (!db) {
     return;
   }
-  await setDoc(doc(db, ROOM_COLLECTION, room.roomId), encodeRoom(room));
+  const roomRef = doc(db, ROOM_COLLECTION, room.roomId);
+  await runTransaction(db, async (transaction) => {
+    const currentSnapshot = await transaction.get(roomRef);
+    const currentRoom = currentSnapshot.exists() ? decodeRoom(currentSnapshot.data()) : null;
+    const currentTerminalRank = getClassroomTerminalRank(currentRoom);
+    const incomingTerminalRank = getClassroomTerminalRank(room);
+
+    // Delayed answers may not revive a finished room. A deliberate lobby reset
+    // remains supported, and close/delete can still advance terminal lifecycle.
+    if (currentTerminalRank > 0 && incomingTerminalRank === 0 && !isExplicitClassroomReset(room)) {
+      return;
+    }
+    if (currentTerminalRank > 0 && incomingTerminalRank > 0 && incomingTerminalRank <= currentTerminalRank) {
+      return;
+    }
+    transaction.set(roomRef, encodeRoom(room));
+  });
 }
 
 export async function readFirebaseClassroomRoom(roomId: string) {

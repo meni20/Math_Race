@@ -11,6 +11,10 @@ function clampProgress(progressPercent: number) {
   return Math.max(0, Math.min(100, progressPercent));
 }
 
+export function getTeacherCarLeftPercent(progressPercent: number) {
+  return `${clampProgress(progressPercent)}%`;
+}
+
 function statusTone(status: TeacherPlayerView["status"]) {
   if (status === "RACING") {
     return "text-emerald-100";
@@ -180,8 +184,8 @@ function Track({
       {player ? (
         <div className="absolute left-6 right-6 top-1/2 z-20 -translate-y-1/2">
           <div
-            className="w-11 -translate-x-1/2 transition-[left] duration-300"
-            style={{ marginLeft: `${boundedProgress}%` }}
+            className="absolute top-1/2 w-11 -translate-x-1/2 -translate-y-1/2 transition-[left] duration-300 ease-out"
+            style={{ left: getTeacherCarLeftPercent(boundedProgress) }}
           >
             <TeacherCarIcon carId={player.carId} label={player.carName} className="drop-shadow-[0_7px_12px_rgba(0,0,0,0.4)]" />
           </div>

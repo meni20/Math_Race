@@ -132,6 +132,7 @@ export function TeacherDashboard({
       roomSettings: snapshot.roomSettings,
       raceStartedAtMs: snapshot.raceStartedAtMs,
       raceFinishedAtMs: snapshot.raceStoppedAtMs || Date.now(),
+      winnerPlayerId: snapshot.winnerPlayerId,
       players: snapshot.players.map((player) => ({
         playerId: player.playerId,
         name: player.name,

@@ -179,7 +179,7 @@ public class GameStateServiceTest {
     }
 
     @Test
-    public void multiplayerHumanFinishDoesNotStopRaceForActiveHumans() {
+    public void firstMultiplayerHumanFinishStopsRaceForEveryone() {
         gameStateService.joinRoom(new JoinRoomRequest("arena-multi-finish", "p-1", "Player One"));
         gameStateService.joinRoom(new JoinRoomRequest("arena-multi-finish", "p-2", "Player Two"));
         GameRoomState room = gameStateService.getRooms().iterator().next();
@@ -206,14 +206,15 @@ public class GameStateServiceTest {
         GameStateService.TickDispatch dispatch = gameStateService.tickAndBuildUpdates(0.05);
 
         assertEquals(1, dispatch.stateUpdates().size());
-        assertEquals("active", dispatch.stateUpdates().get(0).racePhase());
-        assertFalse(dispatch.stateUpdates().get(0).raceStopped());
+        assertEquals("finish", dispatch.stateUpdates().get(0).racePhase());
+        assertTrue(dispatch.stateUpdates().get(0).raceStopped());
+        assertEquals("p-1", dispatch.stateUpdates().get(0).winnerPlayerId());
         assertEquals("finish", dispatch.stateUpdates().get(0).players().stream()
             .filter(player -> "p-1".equals(player.playerId()))
             .findFirst()
             .orElseThrow()
             .racePhase());
-        assertEquals("active", dispatch.stateUpdates().get(0).players().stream()
+        assertEquals("finish", dispatch.stateUpdates().get(0).players().stream()
             .filter(player -> "p-2".equals(player.playerId()))
             .findFirst()
             .orElseThrow()

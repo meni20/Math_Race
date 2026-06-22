@@ -69,7 +69,6 @@ public class GameStateService {
     private static final String PHASE_STARTING = "starting";
     private static final String PHASE_ACTIVE = "active";
     private static final String PHASE_FINISH = "finish";
-    private static final String BOT_ID_MARKER = "-ai-";
     private static final String DEFAULT_CAR_ID = "bmw-m3";
     private static final List<String> AVAILABLE_CAR_IDS = List.of(
         "bmw-m3",
@@ -658,11 +657,7 @@ public class GameStateService {
             }
 
             if (!room.isRaceStopped() && winnerCandidate != null) {
-                if (shouldStopRaceAfterFinish(room, winnerCandidate.player())) {
-                    stopRace(room, winnerCandidate.player(), winnerCandidate.crossedAtMs());
-                } else if (room.getWinnerPlayerId() == null && !isBotPlayer(winnerCandidate.player())) {
-                    room.setWinnerPlayerId(winnerCandidate.player().getPlayerId());
-                }
+                stopRace(room, winnerCandidate.player(), winnerCandidate.crossedAtMs());
             }
 
             if (!room.isRaceStopped() && hasRaceTimerExpired(room, stepNow)) {
@@ -794,33 +789,6 @@ public class GameStateService {
         return PHASE_ACTIVE.equals(room.getRacePhase())
             && !room.isRaceStopped()
             && now >= raceDeadlineMs(room);
-    }
-
-    private long humanParticipantCount(GameRoomState room) {
-        return room.getPlayers().values().stream().filter(player -> !isBotPlayer(player)).count();
-    }
-
-    private boolean shouldStopRaceAfterFinish(GameRoomState room, PlayerState finisher) {
-        if (isBotPlayer(finisher)) {
-            return humanParticipantCount(room) == 0;
-        }
-        long humanCount = humanParticipantCount(room);
-        if (humanCount <= 1) {
-            return true;
-        }
-        return room.getPlayers().values().stream()
-            .filter(player -> !isBotPlayer(player))
-            .allMatch(PlayerState::isFinished);
-    }
-
-    private boolean isBotPlayer(PlayerState player) {
-        String playerId = player.getPlayerId() == null ? "" : player.getPlayerId().trim().toLowerCase();
-        String displayName = player.getDisplayName() == null ? "" : player.getDisplayName().trim().toLowerCase();
-        return playerId.contains(BOT_ID_MARKER)
-            || playerId.startsWith("ai-")
-            || playerId.startsWith("bot-")
-            || displayName.startsWith("ai ")
-            || displayName.startsWith("bot ");
     }
 
     private String normalizeStoredPlayerRacePhase(PlayerState player, GameRoomState room) {

@@ -124,6 +124,10 @@ class GameSocketClient {
   }
 
   submitAnswer(answer: string, timeout = false) {
+    const currentState = useGameStore.getState();
+    if (currentState.raceStopped || currentState.racePhase !== "active") {
+      return;
+    }
     const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       void this.supabaseClient.submitAnswer(answer, timeout);
@@ -155,6 +159,10 @@ class GameSocketClient {
   }
 
   submitDecision(choice: "HIGHWAY" | "DIRT") {
+    const currentState = useGameStore.getState();
+    if (currentState.raceStopped || currentState.racePhase !== "active") {
+      return;
+    }
     const transport = this.getRuntimeTransport();
     if (transport === "supabase") {
       useGameStore.getState().beginLocalDecisionPrediction(choice);

@@ -92,6 +92,7 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
   const perfect = players.filter((player) => accuracy(player) === 100);
   const highway = players.filter((player) => player.routeMode.toUpperCase().includes("HIGHWAY"));
   const dirt = players.filter((player) => player.routeMode.toUpperCase().includes("DIRT"));
+  const isWinner = Boolean(results?.viewerPlayerId && results.viewerPlayerId === results.winnerPlayerId);
 
   return (
     <section dir="rtl" className="race-results-page relative z-[100] min-h-screen overflow-x-hidden bg-[#f4f7ff] px-4 py-8 text-slate-900 md:px-8">
@@ -103,7 +104,8 @@ export function RaceResultsPage({ sessionId }: RaceResultsPageProps) {
       <div className="relative mx-auto max-w-7xl">
         <header className="text-center">
           <p className="text-xs font-black uppercase tracking-[0.22em] text-indigo-600">קו הסיום · חדר {sessionId}</p>
-          <h1 className="mt-2 text-4xl font-black text-slate-950 md:text-6xl">תוצאות המרוץ</h1>
+          <h1 className="mt-2 text-4xl font-black text-slate-950 md:text-6xl">{isWinner ? "ניצחת במרוץ!" : "המרוץ הסתיים"}</h1>
+          <p className="mt-2 text-lg font-black text-indigo-700">תוצאות המרוץ</p>
           <p className="mt-2 text-base font-bold text-slate-600">{results?.raceName ?? "מרוץ מתמטיקה"}</p>
         </header>
 

@@ -66,6 +66,8 @@ function App() {
   const roomSettings = useGameStore((state) => state.roomSettings);
   const raceStartedAtMs = useGameStore((state) => state.raceStartedAtMs);
   const raceFinishedAtMs = useGameStore((state) => state.raceFinishedAtMs);
+  const winnerPlayerId = useGameStore((state) => state.winnerPlayerId);
+  const localPlayerId = useGameStore((state) => state.playerId);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -169,12 +171,14 @@ function App() {
       roomSettings,
       raceStartedAtMs,
       raceFinishedAtMs: raceFinishedAtMs ?? Date.now(),
+      winnerPlayerId,
+      viewerPlayerId: localPlayerId,
       players: finalPlayers
     });
     if (saved) {
       navigateToRaceResults(roomId);
     }
-  }, [players, raceFinishedAtMs, racePhase, raceStartedAtMs, raceStopped, roomId, roomSettings]);
+  }, [localPlayerId, players, raceFinishedAtMs, racePhase, raceStartedAtMs, raceStopped, roomId, roomSettings, winnerPlayerId]);
 
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const resultsSessionId = getResultsSessionId(pathname);
